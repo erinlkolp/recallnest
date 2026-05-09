@@ -219,6 +219,41 @@ textarea { resize: vertical; min-height: 120px; }
   margin-top: 10px;
 }
 
+.sort-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sort-label {
+  color: var(--muted);
+  font-size: 13px;
+  margin-right: 4px;
+}
+
+.sort-toggle {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.75);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.sort-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.sort-toggle.is-active {
+  background: var(--accent);
+  color: #f6fffd;
+  border-color: transparent;
+}
+
 .action-button,
 .ghost-button,
 .card-chip {

@@ -32,6 +32,17 @@ const sideView = document.getElementById('sideView');
 let currentView = 'dashboard';
 let lastItems = [];
 let lastMode = 'search';
+
+const SORT_STORAGE_KEY = 'recallnest:searchSort';
+function readSortMode() {
+  try {
+    const value = localStorage.getItem(SORT_STORAGE_KEY);
+    return value === 'latest' ? 'latest' : 'relevance';
+  } catch {
+    return 'relevance';
+  }
+}
+let sortMode = readSortMode();
 let lastArtifact = null;
 let fullStatsText = 'Loading stats...';
 let fullPinsText = 'Loading pins...';
@@ -329,55 +340,80 @@ function bindResultCardActions() {
   });
 }
 
+function searchCardHtml(item, mode) {
+  return `
+    <article class="result-card ${item.source === 'asset' ? 'is-asset' : ''}" data-card-id="${escapeHtml(item.shortId)}">
+      <div class="result-card-header">
+        <div class="result-card-meta">
+          <span class="result-id">${escapeHtml(item.shortId)}</span>
+          <span class="result-score">${escapeHtml(item.score)}%</span>
+          <span>${escapeHtml(item.source)}</span>
+          <span>${escapeHtml(item.date)}</span>
+        </div>
+      </div>
+      <p class="result-snippet">${escapeHtml(cardSnippet(item).slice(0, 220))}${cardSnippet(item).length > 220 ? '...' : ''}</p>
+      <div class="result-card-meta">
+        <span>${escapeHtml(item.scope)}</span>
+        <span>${escapeHtml(item.retrievalPath)}</span>
+        <span>${escapeHtml(item.file || '-')}</span>
+      </div>
+      <div class="result-card-actions">
+        <button class="card-chip" data-fill-id="${escapeHtml(item.shortId)}">Use ID</button>
+        <button class="card-chip" data-pin-id="${escapeHtml(item.shortId)}">Pin</button>
+        <button class="card-chip" data-toggle-id="${escapeHtml(item.shortId)}">Details</button>
+        ${mode === 'distill' ? '' : `<button class="card-chip" data-copy-text="${encodeURIComponent(item.text)}">Copy Text</button>`}
+      </div>
+      <div class="result-card-detail">
+        <div class="detail-block">
+          <strong>Full Text</strong>
+          <pre>${escapeHtml(item.text)}</pre>
+        </div>
+        <div class="detail-block">
+          <strong>Metadata</strong>
+          <code>${escapeHtml(JSON.stringify(item.metadata || {}, null, 2))}</code>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function sortItemsByLatest(items) {
+  return [...items].sort((a, b) => {
+    const tb = Number(b.timestamp) || 0;
+    const ta = Number(a.timestamp) || 0;
+    return tb - ta;
+  });
+}
+
 function renderSearchCards(items, mode) {
   if (!items || items.length === 0) {
     resultCards.innerHTML = '<div class="empty-state">No structured results yet. Run a query or broaden the profile.</div>';
     return;
   }
 
-  const groups = groupBySource(items);
-  resultCards.innerHTML = groups.map(([source, entries]) => `
-    <section class="result-group">
-      <div class="result-group-head">
-        <strong>${escapeHtml(source)}</strong>
-        <span>${entries.length} hit${entries.length > 1 ? 's' : ''}</span>
-      </div>
-      ${entries.map((item) => `
-        <article class="result-card ${item.source === 'asset' ? 'is-asset' : ''}" data-card-id="${escapeHtml(item.shortId)}">
-          <div class="result-card-header">
-            <div class="result-card-meta">
-              <span class="result-id">${escapeHtml(item.shortId)}</span>
-              <span class="result-score">${escapeHtml(item.score)}%</span>
-              <span>${escapeHtml(item.source)}</span>
-              <span>${escapeHtml(item.date)}</span>
-            </div>
-          </div>
-          <p class="result-snippet">${escapeHtml(cardSnippet(item).slice(0, 220))}${cardSnippet(item).length > 220 ? '...' : ''}</p>
-          <div class="result-card-meta">
-            <span>${escapeHtml(item.scope)}</span>
-            <span>${escapeHtml(item.retrievalPath)}</span>
-            <span>${escapeHtml(item.file || '-')}</span>
-          </div>
-          <div class="result-card-actions">
-            <button class="card-chip" data-fill-id="${escapeHtml(item.shortId)}">Use ID</button>
-            <button class="card-chip" data-pin-id="${escapeHtml(item.shortId)}">Pin</button>
-            <button class="card-chip" data-toggle-id="${escapeHtml(item.shortId)}">Details</button>
-            ${mode === 'distill' ? '' : `<button class="card-chip" data-copy-text="${encodeURIComponent(item.text)}">Copy Text</button>`}
-          </div>
-          <div class="result-card-detail">
-            <div class="detail-block">
-              <strong>Full Text</strong>
-              <pre>${escapeHtml(item.text)}</pre>
-            </div>
-            <div class="detail-block">
-              <strong>Metadata</strong>
-              <code>${escapeHtml(JSON.stringify(item.metadata || {}, null, 2))}</code>
-            </div>
-          </div>
-        </article>
-      `).join('')}
-    </section>
-  `).join('');
+  if (sortMode === 'latest') {
+    const sorted = sortItemsByLatest(items);
+    resultCards.innerHTML = `
+      <section class="result-group">
+        <div class="result-group-head">
+          <strong>Latest first</strong>
+          <span>${sorted.length} hit${sorted.length > 1 ? 's' : ''}</span>
+        </div>
+        ${sorted.map((item) => searchCardHtml(item, mode)).join('')}
+      </section>
+    `;
+  } else {
+    const groups = groupBySource(items);
+    resultCards.innerHTML = groups.map(([source, entries]) => `
+      <section class="result-group">
+        <div class="result-group-head">
+          <strong>${escapeHtml(source)}</strong>
+          <span>${entries.length} hit${entries.length > 1 ? 's' : ''}</span>
+        </div>
+        ${entries.map((item) => searchCardHtml(item, mode)).join('')}
+      </section>
+    `).join('');
+  }
 
   bindResultCardActions();
 }
@@ -865,6 +901,27 @@ viewTabs.forEach((tab) => {
 
 document.querySelectorAll('[data-mode]').forEach((button) => {
   button.addEventListener('click', () => runMode(button.dataset.mode));
+});
+
+const sortToggles = document.querySelectorAll('[data-sort]');
+function refreshSortToggles() {
+  sortToggles.forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.sort === sortMode);
+  });
+}
+refreshSortToggles();
+sortToggles.forEach((button) => {
+  button.addEventListener('click', () => {
+    const next = button.dataset.sort === 'latest' ? 'latest' : 'relevance';
+    if (next === sortMode) return;
+    sortMode = next;
+    try { localStorage.setItem(SORT_STORAGE_KEY, sortMode); } catch {}
+    refreshSortToggles();
+    renderMainSurface();
+    statusLine.textContent = sortMode === 'latest'
+      ? 'Sorting results by latest first.'
+      : 'Sorting results by relevance.';
+  });
 });
 
 document.getElementById('pinButton').addEventListener('click', pinMemory);
