@@ -335,6 +335,21 @@ export class MemoryStore {
     this.table = table;
   }
 
+  /**
+   * Refresh the cached LanceDB table handle to the latest on-disk version.
+   *
+   * LanceDB tables are versioned snapshots — a Table opened by one process
+   * (or this one before a concurrent write from another process) stays
+   * pinned to its opened version and will not see new rows until
+   * checkoutLatest() is called. Use this on read paths when freshness across
+   * process boundaries matters (e.g. UI server reading data the MCP server
+   * just wrote). No-op when the table has not been opened yet.
+   */
+  async refresh(): Promise<void> {
+    if (!this.table) return;
+    await this.table.checkoutLatest();
+  }
+
   private async createFtsIndex(table: LanceDB.Table): Promise<void> {
     try {
       // Check if FTS index already exists

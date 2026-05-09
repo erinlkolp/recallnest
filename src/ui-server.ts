@@ -157,7 +157,8 @@ function serveStatic(pathname: string): Response | null {
 
 async function handleSearch(mode: "search" | "explain" | "distill", body: Record<string, any>) {
   const query = requireString(body.query, "query");
-  const { retriever, profile } = getComponents(readOptionalString(body.profile));
+  const { retriever, profile, store } = getComponents(readOptionalString(body.profile));
+  await store.refresh();
   const explicitScope = readOptionalString(body.scope);
   const results = await retriever.retrieve(buildRetrievalContext({
     query,
@@ -267,6 +268,7 @@ const server = Bun.serve({
 
       if (request.method === "GET" && url.pathname === "/api/skills") {
         const { store, embedder } = getComponents();
+        await store.refresh();
         const { retrieveSkills } = await import("./skill-engine.js");
         const scope = url.searchParams.get("scope") || undefined;
         const skills = await retrieveSkills(store, embedder, "all skills", scope, 20);
@@ -289,6 +291,7 @@ const server = Bun.serve({
 
       if (request.method === "GET" && url.pathname === "/api/stats") {
         const { store } = getComponents();
+        await store.refresh();
         const stats = await store.stats();
         const sourceCounts = Object.entries(stats.scopeCounts)
           .sort((a, b) => b[1] - a[1])
@@ -320,6 +323,7 @@ const server = Bun.serve({
         const body = await readJson(request);
         const memoryId = requireString(body.memoryId, "memoryId");
         const { store, embedder } = getComponents(readOptionalString(body.profile));
+        await store.refresh();
         const scopeSelection = resolveScopeSelection({
           scope: readOptionalString(body.scope),
           sessionId: readOptionalString(body.sessionId),
@@ -349,6 +353,7 @@ const server = Bun.serve({
         const body = await readJson(request);
         const query = requireString(body.query, "query");
         const { retriever, profile, store, embedder } = getComponents(readOptionalString(body.profile) || "writing");
+        await store.refresh();
         const results = await retriever.retrieve(buildRetrievalContext({
           query,
           limit: readLimit(body.limit, 8, 1, 20),
@@ -379,12 +384,14 @@ const server = Bun.serve({
           return Response.json({ output: "No dirty briefs found.", count: 0, archived: 0, deleted: 0 });
         }
 
+        const { store } = getComponents();
+        await store.refresh();
         let archived = 0;
         let deleted = 0;
         for (const row of rows) {
           archiveDirtyBriefAsset(row);
           archived += 1;
-          deleted += await getComponents().store.bulkDelete([row.scope]);
+          deleted += await store.bulkDelete([row.scope]);
         }
 
         return Response.json({
@@ -398,7 +405,8 @@ const server = Bun.serve({
       if (request.method === "POST" && url.pathname === "/api/export") {
         const body = await readJson(request);
         const query = requireString(body.query, "query");
-        const { retriever, profile } = getComponents(readOptionalString(body.profile) || "writing");
+        const { retriever, profile, store } = getComponents(readOptionalString(body.profile) || "writing");
+        await store.refresh();
         const results = await retriever.retrieve(buildRetrievalContext({
           query,
           limit: readLimit(body.limit, 8, 1, 20),
@@ -450,6 +458,7 @@ const server = Bun.serve({
       // ----- Dashboard API -----
       if (request.method === "GET" && url.pathname === "/api/dashboard-stats") {
         const { store } = getComponents();
+        await store.refresh();
         const stats = await store.stats();
         const allEntries = await store.list(undefined, undefined, 10000, 0);
 
@@ -469,6 +478,7 @@ const server = Bun.serve({
 
       if (request.method === "GET" && url.pathname === "/api/stale-memories") {
         const { store } = getComponents();
+        await store.refresh();
         const { runMemoryLint } = await import("./memory-lint.js");
         const report = await runMemoryLint({ store });
         const staleFindings = report.findings.filter(f => f.check === "stale");
@@ -483,6 +493,7 @@ const server = Bun.serve({
 
       if (request.method === "GET" && url.pathname === "/api/lint-summary") {
         const { store } = getComponents();
+        await store.refresh();
         const { runMemoryLint } = await import("./memory-lint.js");
         const report = await runMemoryLint({ store });
         return Response.json({
