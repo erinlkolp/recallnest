@@ -24,6 +24,10 @@ const togglePinsButton = document.getElementById('togglePinsButton');
 const toggleTraceButton = document.getElementById('toggleTraceButton');
 const viewTabs = Array.from(document.querySelectorAll('.view-tab'));
 const quickCards = Array.from(document.querySelectorAll('[data-quick-action]'));
+const dashboardView = document.getElementById('dashboardView');
+const searchView = document.getElementById('searchView');
+const resultView = document.getElementById('resultView');
+const sideView = document.getElementById('sideView');
 
 let currentView = 'dashboard';
 let lastItems = [];
@@ -156,6 +160,11 @@ function setActiveView(view) {
   viewTabs.forEach((tab) => {
     tab.classList.toggle('is-active', tab.dataset.view === view);
   });
+  const showDashboard = view === 'dashboard';
+  if (dashboardView) dashboardView.classList.toggle('is-hidden', !showDashboard);
+  if (searchView) searchView.classList.toggle('is-hidden', showDashboard);
+  if (resultView) resultView.classList.toggle('is-hidden', showDashboard);
+  if (sideView) sideView.classList.toggle('is-hidden', showDashboard);
   const filterEnabled = view === 'pins' || view === 'exports';
   viewToolbar.classList.toggle('is-hidden', !filterEnabled);
   assetTagBar.classList.toggle('is-hidden', view !== 'pins');
@@ -927,10 +936,6 @@ const dashCategoryBars = document.getElementById('dashCategoryBars');
 const dashLintSummary = document.getElementById('dashLintSummary');
 const dashStaleList = document.getElementById('dashStaleList');
 const dashStaleCount = document.getElementById('dashStaleCount');
-const dashboardView = document.getElementById('dashboardView');
-const searchView = document.getElementById('searchView');
-const resultView = document.getElementById('resultView');
-const sideView = document.getElementById('sideView');
 const refreshDashboard = document.getElementById('refreshDashboard');
 
 const CATEGORY_COLORS = {
@@ -1000,28 +1005,6 @@ async function loadDashboard() {
     console.error('Dashboard load error:', err);
     dashLintSummary.textContent = 'Failed to load dashboard data';
   }
-}
-
-const originalViewTabs = Array.from(document.querySelectorAll('.view-tab'));
-for (const tab of originalViewTabs) {
-  tab.addEventListener('click', () => {
-    const view = tab.dataset.view;
-    originalViewTabs.forEach(t => t.classList.toggle('is-active', t === tab));
-
-    if (view === 'dashboard') {
-      if (dashboardView) dashboardView.classList.remove('is-hidden');
-      if (searchView) searchView.classList.add('is-hidden');
-      if (resultView) resultView.classList.add('is-hidden');
-      if (sideView) sideView.classList.add('is-hidden');
-    } else {
-      if (dashboardView) dashboardView.classList.add('is-hidden');
-      if (searchView) searchView.classList.remove('is-hidden');
-      if (resultView) resultView.classList.remove('is-hidden');
-      if (sideView) sideView.classList.remove('is-hidden');
-    }
-
-    currentView = view;
-  });
 }
 
 if (refreshDashboard) {
