@@ -1,0 +1,365 @@
+/**
+ * Memory Evolution — lifecycle tracking for memory entries.
+ *
+ * Adds status, version, access tracking, supersede/consolidation links,
+ * and decay scoring to each memory. Fields live inside the existing
+ * metadata JSON so the LanceDB schema is unchanged.
+ *
+ * Design principles (from arXiv 2512.13564 survey):
+ * - Archive-first, delete-never
+ * - Supersede-on-conflict (old stays, new links to it)
+ * - Composite decay = 0.2 time + 0.3 frequency + 0.5 importance (base)
+ *   With emotion: 0.15 time + 0.25 frequency + 0.45 importance + 0.15 emotionSalience
+ */
+
+import { parseEmotion, isEmotionScoringEnabled } from "./memory-schema.js";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type EvolutionStatus = "active" | "superseded" | "archived" | "consolidated" | "pending_review";
+
+export interface EvolutionMetadata {
+  status: EvolutionStatus;
+  version: number;
+  accessCount: number;
+  lastAccessedAt: number | null;
+  supersededBy: string | null;
+  /** HP-1: Reverse link — this memory supersedes an older one */
+  supersedes: string | null;
+  /** HP-1: Why this memory replaced the old one */
+  evolutionNote: string | null;
+  consolidatedInto: string | null;
+  /** HP-5: This memory contributed to a cross-memory pattern discovery */
+  contributedToPattern: string | null;
+  sourceMemories: string[];
+  validFrom: number;
+  validUntil: number | null;
+  /** F3: Event actual time (ms) — distinct from memory creation time (validFrom). */
+  eventTime: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+export function defaultEvolution(now?: number): EvolutionMetadata {
+  const ts = now ?? Date.now();
+  return {
+    status: "active",
+    version: 1,
+    accessCount: 0,
+    lastAccessedAt: null,
+    supersededBy: null,
+    supersedes: null,
+    evolutionNote: null,
+    consolidatedInto: null,
+    contributedToPattern: null,
+    sourceMemories: [],
+    validFrom: ts,
+    validUntil: null,
+    eventTime: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Parse / Serialize
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract evolution metadata from a memory's metadata JSON string.
+ * Returns sensible defaults when the field is absent (backward compat).
+ */
+export function parseEvolution(metadata: string | undefined, fallbackTimestamp?: number): EvolutionMetadata {
+  if (!metadata) return defaultEvolution(fallbackTimestamp);
+  try {
+    const parsed = JSON.parse(metadata);
+    const evo = parsed?.evolution;
+    if (!evo) return defaultEvolution(fallbackTimestamp);
+    return {
+      status: evo.status ?? "active",
+      version: evo.version ?? 1,
+      accessCount: evo.accessCount ?? 0,
+      lastAccessedAt: evo.lastAccessedAt ?? null,
+      supersededBy: evo.supersededBy ?? null,
+      supersedes: evo.supersedes ?? null,
+      evolutionNote: evo.evolutionNote ?? null,
+      consolidatedInto: evo.consolidatedInto ?? null,
+      contributedToPattern: evo.contributedToPattern ?? null,
+      sourceMemories: Array.isArray(evo.sourceMemories) ? evo.sourceMemories : [],
+      validFrom: evo.validFrom ?? fallbackTimestamp ?? Date.now(),
+      validUntil: evo.validUntil ?? null,
+      eventTime: evo.eventTime ?? null,
+    };
+  } catch {
+    return defaultEvolution(fallbackTimestamp);
+  }
+}
+
+/**
+ * Patch evolution fields into an existing metadata JSON string.
+ * Merges with existing evolution — does not wipe unset fields.
+ */
+export function patchEvolution(
+  metadata: string | undefined,
+  patch: Partial<EvolutionMetadata>,
+): string {
+  let parsed: Record<string, unknown> = {};
+  if (metadata) {
+    try { parsed = JSON.parse(metadata); } catch { /* keep empty */ }
+  }
+  const existing = parsed.evolution as Partial<EvolutionMetadata> | undefined;
+  parsed.evolution = { ...existing, ...patch };
+  return JSON.stringify(parsed);
+}
+
+// ---------------------------------------------------------------------------
+// Predicates
+// ---------------------------------------------------------------------------
+
+/** Is this memory currently active (not superseded/archived/consolidated)?
+ *  HP-6: pending_review memories are also considered active for search purposes. */
+export function isActiveMemory(metadata: string | undefined): boolean {
+  const evo = parseEvolution(metadata);
+  return evo.status === "active" || evo.status === "pending_review";
+}
+
+// ---------------------------------------------------------------------------
+// Access Tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Record a retrieval hit: increment accessCount and update lastAccessedAt.
+ * Returns updated metadata JSON string.
+ */
+export function recordAccess(metadata: string | undefined): string {
+  const evo = parseEvolution(metadata);
+  return patchEvolution(metadata, {
+    accessCount: evo.accessCount + 1,
+    lastAccessedAt: Date.now(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Supersede / Consolidate helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark a memory as superseded by a newer memory.
+ * Sets status, validUntil, and supersededBy link.
+ */
+export function buildSupersedeMetadata(
+  oldMetadata: string | undefined,
+  newMemoryId: string,
+): string {
+  return patchEvolution(oldMetadata, {
+    status: "superseded",
+    validUntil: Date.now(),
+    supersededBy: newMemoryId,
+  });
+}
+
+/**
+ * HP-1: Build evolution metadata for the NEW memory that supersedes an old one.
+ * Sets supersedes link + optional evolution note (bidirectional with buildSupersedeMetadata).
+ */
+export function buildSupersedeMetadataForNew(
+  newMetadata: string | undefined,
+  oldMemoryId: string,
+  evolutionNote?: string,
+): string {
+  return patchEvolution(newMetadata, {
+    supersedes: oldMemoryId,
+    evolutionNote: evolutionNote ?? null,
+  });
+}
+
+/**
+ * HP-1: Trace the evolution chain for a memory.
+ * Walks both directions: supersededBy (forward) and supersedes (backward).
+ * Returns an ordered timeline from oldest to newest.
+ */
+export interface EvolutionTraceEntry {
+  id: string;
+  direction: "predecessor" | "self" | "successor";
+  status: EvolutionStatus;
+  evolutionNote: string | null;
+  validFrom: number;
+  validUntil: number | null;
+}
+
+export async function traceEvolution(
+  startId: string,
+  getEntry: (id: string) => Promise<{ metadata?: string; timestamp?: number } | null>,
+  maxDepth = 10,
+): Promise<EvolutionTraceEntry[]> {
+  const predecessors: EvolutionTraceEntry[] = [];
+  const successors: EvolutionTraceEntry[] = [];
+
+  // Walk backward (supersedes chain)
+  let currentId: string | null = startId;
+  let depth = 0;
+  const startEntry = await getEntry(startId);
+  const startEvo = parseEvolution(startEntry?.metadata, startEntry?.timestamp);
+
+  // First, walk backward via supersedes
+  currentId = startEvo.supersedes;
+  while (currentId && depth < maxDepth) {
+    const entry = await getEntry(currentId);
+    if (!entry) break;
+    const evo = parseEvolution(entry.metadata, entry.timestamp);
+    predecessors.unshift({
+      id: currentId,
+      direction: "predecessor",
+      status: evo.status,
+      evolutionNote: evo.evolutionNote,
+      validFrom: evo.validFrom,
+      validUntil: evo.validUntil,
+    });
+    currentId = evo.supersedes;
+    depth++;
+  }
+
+  // Self
+  const self: EvolutionTraceEntry = {
+    id: startId,
+    direction: "self",
+    status: startEvo.status,
+    evolutionNote: startEvo.evolutionNote,
+    validFrom: startEvo.validFrom,
+    validUntil: startEvo.validUntil,
+  };
+
+  // Walk forward (supersededBy chain)
+  currentId = startEvo.supersededBy;
+  depth = 0;
+  while (currentId && depth < maxDepth) {
+    const entry = await getEntry(currentId);
+    if (!entry) break;
+    const evo = parseEvolution(entry.metadata, entry.timestamp);
+    successors.push({
+      id: currentId,
+      direction: "successor",
+      status: evo.status,
+      evolutionNote: evo.evolutionNote,
+      validFrom: evo.validFrom,
+      validUntil: evo.validUntil,
+    });
+    currentId = evo.supersededBy;
+    depth++;
+  }
+
+  return [...predecessors, self, ...successors];
+}
+
+/**
+ * Mark a memory as consolidated into a higher-level memory.
+ * The original is kept (archive-first) but linked to the consolidated entry.
+ */
+export function buildConsolidatedMetadata(
+  oldMetadata: string | undefined,
+  consolidatedMemoryId: string,
+): string {
+  return patchEvolution(oldMetadata, {
+    status: "consolidated",
+    consolidatedInto: consolidatedMemoryId,
+  });
+}
+
+/**
+ * Mark a memory as archived (low decay score for extended period).
+ */
+export function buildArchivedMetadata(oldMetadata: string | undefined): string {
+  return patchEvolution(oldMetadata, { status: "archived" });
+}
+
+/**
+ * HP-6: Mark a memory as pending_review (low-confidence store).
+ * Pending memories participate in search but are prioritized for distill processing.
+ */
+export function buildPendingReviewMetadata(metadata: string | undefined): string {
+  return patchEvolution(metadata, { status: "pending_review" });
+}
+
+/** HP-6: Check if a memory is pending review. */
+export function isPendingReview(metadata: string | undefined): boolean {
+  return parseEvolution(metadata).status === "pending_review";
+}
+
+/** HP-6: Resolve pending → active (after distill re-evaluation confirms it). */
+export function resolvePendingReview(metadata: string | undefined): string {
+  return patchEvolution(metadata, { status: "active" });
+}
+
+// ---------------------------------------------------------------------------
+// Decay Scoring
+// ---------------------------------------------------------------------------
+
+const TIME_HALF_LIFE_DAYS = 90;
+
+// Base weights (no emotion): 0.2 + 0.3 + 0.5 = 1.0
+const TIME_WEIGHT_BASE = 0.2;
+const FREQUENCY_WEIGHT_BASE = 0.3;
+const IMPORTANCE_WEIGHT_BASE = 0.5;
+
+// Emotion-enabled weights: 0.15 + 0.25 + 0.45 + 0.15 = 1.0
+const TIME_WEIGHT_EMO = 0.15;
+const FREQUENCY_WEIGHT_EMO = 0.25;
+const IMPORTANCE_WEIGHT_EMO = 0.45;
+const EMOTION_WEIGHT = 0.15;
+
+/**
+ * Compute composite decay score (0–1, higher = more valuable to keep).
+ *
+ * Base:    0.2 × timeDecay + 0.3 × frequencyScore + 0.5 × importance
+ * Emotion: 0.15 × time + 0.25 × freq + 0.45 × importance + 0.15 × emotionSalience
+ *
+ * Time decay: exponential with 90-day half-life.
+ * Frequency: log(1 + accessCount) × recencyBoost, capped at 1.
+ * Importance: as-stored (0–1).
+ * Emotion salience: (|valence| + arousal) / 2 — composite mnemonic significance.
+ *
+ * @param metadata - Optional metadata JSON string for emotion extraction.
+ *                   When absent or emotion flag off, falls back to base weights.
+ */
+export function computeDecayScore(
+  evo: EvolutionMetadata,
+  importance: number,
+  now?: number,
+  metadata?: string,
+): number {
+  const ts = now ?? Date.now();
+
+  // Time decay (Weibull-ish exponential)
+  const daysSinceCreation = Math.max(0, (ts - evo.validFrom) / 86_400_000);
+  const timeDecay = Math.pow(0.5, daysSinceCreation / TIME_HALF_LIFE_DAYS);
+
+  // Frequency score
+  const rawFreq = Math.log2(1 + evo.accessCount);
+  const recencyBoost = evo.lastAccessedAt
+    ? Math.pow(0.5, Math.max(0, (ts - evo.lastAccessedAt) / 86_400_000) / 30) // 30-day half-life for recency
+    : 0.5; // never accessed → neutral
+  const frequencyScore = Math.min(1, rawFreq * recencyBoost);
+
+  const clampedImportance = Math.max(0, Math.min(1, importance));
+
+  // HP-emo: Emotion-aware decay scoring
+  const useEmotion = isEmotionScoringEnabled() && !!metadata;
+  if (useEmotion) {
+    const emotion = parseEmotion(metadata);
+    const salience = emotion?.salience ?? 0;
+    return (
+      TIME_WEIGHT_EMO * timeDecay +
+      FREQUENCY_WEIGHT_EMO * frequencyScore +
+      IMPORTANCE_WEIGHT_EMO * clampedImportance +
+      EMOTION_WEIGHT * salience
+    );
+  }
+
+  return (
+    TIME_WEIGHT_BASE * timeDecay +
+    FREQUENCY_WEIGHT_BASE * frequencyScore +
+    IMPORTANCE_WEIGHT_BASE * clampedImportance
+  );
+}

@@ -1,0 +1,85 @@
+[
+  {
+    "name": "telegram_bridge",
+    "query": "telegram bridge",
+    "profile": "debug",
+    "limit": 5,
+    "expectAny": ["telegram-cli-bridge", "telegram-ai-bridge", "Telegram bridge"],
+    "expectScopePrefixes": ["cc", "asset"],
+    "notes": "Bridge maintenance and migration history should be easy to recall."
+  },
+  {
+    "name": "openclaw_memory",
+    "query": "OpenClaw 记忆系统",
+    "profile": "writing",
+    "limit": 6,
+    "expectAny": ["OpenClaw", "记忆系统", "memory-lancedb-pro", "LanceDB"],
+    "expectScopePrefixes": ["cc", "memory", "asset"],
+    "notes": "Core memory architecture discussion should be recoverable."
+  },
+  {
+    "name": "writing_style",
+    "query": "写作风格 口语化 不端着 可自嘲",
+    "profile": "writing",
+    "limit": 5,
+    "expectAll": ["口语化", "不端着"],
+    "expectAny": ["可自嘲", "写作风格"],
+    "expectScopePrefixes": ["cc", "asset"],
+    "notes": "User writing-style preferences should rank high."
+  },
+  {
+    "name": "visual_style",
+    "query": "审美偏好 手绘涂鸦 高对比撞色",
+    "profile": "default",
+    "limit": 5,
+    "expectAll": ["手绘涂鸦", "高对比撞色"],
+    "expectAny": ["审美偏好"],
+    "expectScopePrefixes": ["cc", "asset"],
+    "notes": "Visual preference memories should stay stable."
+  },
+  {
+    "name": "working_relationship",
+    "query": "我们相处态度",
+    "profile": "default",
+    "limit": 5,
+    "expectAny": ["直接", "少空话", "逻辑", "讲清楚", "表达方式", "Claude Code"],
+    "expectScopePrefixes": ["cc", "asset"],
+    "notes": "Abstract, summarized relationship queries should work without precise keywords."
+  },
+  {
+    "name": "aws_ssh_access",
+    "query": "aws ssh",
+    "profile": "debug",
+    "limit": 6,
+    "expectAny": ["AWS bot", "aws bot", "ssh", "key2", "Discord", "容器"],
+    "expectScopePrefixes": ["cc"],
+    "notes": "Real-world AWS access queries should use the wording the operator actually types."
+  },
+  {
+    "name": "fuzzy_bot_crash",
+    "query": "上次那个 bot 突然挂了是怎么回事来着",
+    "profile": "debug",
+    "limit": 5,
+    "expectAny": ["崩溃", "crash", "error", "报错", "排查", "修复", "docker"],
+    "expectScopePrefixes": ["cc"],
+    "notes": "Fuzzy colloquial query about bot crash should find debugging conversations."
+  },
+  {
+    "name": "fuzzy_ai_feelings",
+    "query": "之前聊过一个关于 AI 到底有没有感受的话题",
+    "profile": "writing",
+    "limit": 5,
+    "expectAny": ["意识", "consciousness", "experiencing", "感受", "自由意志", "sentience"],
+    "expectScopePrefixes": ["cc"],
+    "notes": "Vague conversational query about AI consciousness should recall philosophical discussions."
+  },
+  {
+    "name": "fuzzy_image_style",
+    "query": "那个配图风格轮换的逻辑是怎么搞的",
+    "profile": "default",
+    "limit": 5,
+    "expectAny": ["风格", "style", "轮换", "catalog", "配图"],
+    "expectScopePrefixes": ["cc"],
+    "notes": "Casual question about image style rotation should find implementation discussions."
+  }
+]

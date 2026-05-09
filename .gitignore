@@ -1,0 +1,26 @@
+node_modules/
+data/*
+!data/alias-map.example.json
+logs/
+.env
+*.log
+config.json
+.agent/
+.agents/
+.claude/
+skills/
+skills-lock.json
+__pycache__/
+*.pyc
+
+# Personal memory & local-only state (do not commit)
+daily-reflections/
+.test-data/
+.git-old/
+.mcp.json
+
+# Eval reports & continuity artifacts (contain personal snippets)
+eval/reports/
+eval/continuity/results-*.md
+eval/continuity/runbook.md
+eval/continuity/seed-cases.md
