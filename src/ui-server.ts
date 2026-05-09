@@ -162,7 +162,7 @@ async function handleSearch(mode: "search" | "explain" | "distill", body: Record
   const explicitScope = readOptionalString(body.scope);
   const results = await retriever.retrieve(buildRetrievalContext({
     query,
-    limit: readLimit(body.limit, 5, 1, 20),
+    limit: readLimit(body.limit, 5, 1, 100),
     scope: explicitScope,
     sessionId: readOptionalString(body.sessionId),
     allScopes: explicitScope ? false : true,
@@ -356,7 +356,7 @@ const server = Bun.serve({
         await store.refresh();
         const results = await retriever.retrieve(buildRetrievalContext({
           query,
-          limit: readLimit(body.limit, 8, 1, 20),
+          limit: readLimit(body.limit, 8, 1, 100),
           scope: readOptionalString(body.scope),
           sessionId: readOptionalString(body.sessionId),
           allScopes: readOptionalString(body.scope) ? false : true,
@@ -409,7 +409,7 @@ const server = Bun.serve({
         await store.refresh();
         const results = await retriever.retrieve(buildRetrievalContext({
           query,
-          limit: readLimit(body.limit, 8, 1, 20),
+          limit: readLimit(body.limit, 8, 1, 100),
           scope: readOptionalString(body.scope),
           sessionId: readOptionalString(body.sessionId),
           allScopes: readOptionalString(body.scope) ? false : true,

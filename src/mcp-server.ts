@@ -909,7 +909,7 @@ registerTool(
   "Search indexed memories by semantic similarity and return ranked results with optional temporal filtering. Read-only, but may fire stored reminders as a side effect. Use proactively at the start of tasks, when debugging, writing, or when the user references past work.",
   {
     query: z.string().describe("Search query — natural language or keywords"),
-    limit: z.number().min(1).max(20).default(5).describe("Max results to return"),
+    limit: z.number().min(1).max(100).default(5).describe("Max results to return"),
     scope: z.string().optional().describe("Optional explicit scope"),
     sessionId: z.string().min(1).max(160).optional().describe("Optional session identifier to infer session:<id> scope"),
     allScopes: z.boolean().default(false).describe("When true, explicitly allow cross-scope search"),
@@ -1061,7 +1061,7 @@ registerTool(
   "Explain why memories matched a query: retrieval path, freshness, scope, and matched terms. Read-only. Use when search results seem unexpected and you need to debug ranking or scope filtering.",
   {
     query: z.string().describe("Search query to explain — natural language or keywords, e.g. 'auth migration'"),
-    limit: z.number().min(1).max(20).default(5).describe("Maximum number of matched results to analyze and explain (default: 5)"),
+    limit: z.number().min(1).max(100).default(5).describe("Maximum number of matched results to analyze and explain (default: 5)"),
     scope: z.string().optional().describe("Restrict to a specific scope, e.g. 'project:myapp'. Omit to use default scope"),
     sessionId: z.string().min(1).max(160).optional().describe("Session identifier to infer session-scoped search, e.g. 'abc123'"),
     allScopes: z.boolean().default(false).describe("Set to true to search across all scopes instead of the default scope"),
@@ -1094,7 +1094,7 @@ registerTool(
   "Distill retrieved memories into a compact briefing with source map, key takeaways, and reusable evidence. Use this when you need a synthesized summary of stored knowledge on a topic rather than raw search results. Returns a structured briefing with citations. Read-only — does not modify stored memories.",
   {
     query: z.string().describe("Natural language topic or task to distill, e.g. 'authentication migration decisions'"),
-    limit: z.number().min(1).max(20).default(8).describe("Maximum number of retrieved memories to include in the distillation (default: 8)"),
+    limit: z.number().min(1).max(100).default(8).describe("Maximum number of retrieved memories to include in the distillation (default: 8)"),
     scope: z.string().optional().describe("Restrict search to a specific scope, e.g. 'project:myapp'. Omit to use the default scope"),
     sessionId: z.string().min(1).max(160).optional().describe("Session identifier to infer session-scoped search, e.g. 'abc123'"),
     allScopes: z.boolean().default(false).describe("Set to true to search across all scopes instead of the default scope"),
@@ -1125,7 +1125,7 @@ registerTool(
   "Create a structured memory brief by retrieving and summarizing relevant memories, then persist it as a reusable asset indexed for future recall. Use this when you want to consolidate scattered knowledge on a topic into a single retrievable document. Side effect: writes a new brief asset to disk and indexes it in the vector store for future search.",
   {
     query: z.string().describe("Natural language topic or task to brief, e.g. 'deployment pipeline architecture decisions'"),
-    limit: z.number().min(1).max(20).default(8).describe("Maximum number of source memories to include in the brief (default: 8)"),
+    limit: z.number().min(1).max(100).default(8).describe("Maximum number of source memories to include in the brief (default: 8)"),
     scope: z.string().optional().describe("Restrict search to a specific scope, e.g. 'project:myapp'. Omit to use the default scope"),
     sessionId: z.string().min(1).max(160).optional().describe("Session identifier to infer session-scoped search, e.g. 'abc123'"),
     allScopes: z.boolean().default(false).describe("Set to true to search across all scopes instead of the default scope"),
@@ -1211,7 +1211,7 @@ registerTool(
   "Export a distilled memory briefing to a markdown or JSON file on disk. Side effect: writes an export artifact file. Use when you need an offline-readable snapshot of knowledge on a topic.",
   {
     query: z.string().describe("Topic or task to export, e.g. 'auth migration decisions'"),
-    limit: z.number().min(1).max(20).default(8).describe("Maximum number of source memories to include in the export (default: 8)"),
+    limit: z.number().min(1).max(100).default(8).describe("Maximum number of source memories to include in the export (default: 8)"),
     scope: z.string().optional().describe("Restrict to a specific scope, e.g. 'project:recallnest'. Omit to use default scope"),
     sessionId: z.string().min(1).max(160).optional().describe("Session identifier to infer session-scoped search, e.g. 'abc123'"),
     allScopes: z.boolean().default(false).describe("Set to true to search across all scopes instead of the default scope"),
