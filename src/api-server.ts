@@ -25,6 +25,7 @@ import { buildManagedCheckpointObservation, buildManagedResumeObservation } from
 import { runAutoRecall } from "./auto-recall.js";
 import { buildRetrievalContext, resolveScopeSelection } from "./scope-policy.js";
 import { runMemoryLint } from "./memory-lint.js";
+import { parseAllowedHostsEnv, validateLocalRequest } from "./server-csrf.js";
 
 const config = (loadDotEnv(), loadConfig());
 const getComponents = createComponentResolver(config);
@@ -626,11 +627,15 @@ async function handleHealth(): Promise<Response> {
 // ============================================================================
 
 const port = clampInt(process.env.RECALLNEST_API_PORT, 4318, 1, 65535);
+const extraAllowedHosts = parseAllowedHostsEnv(process.env.RECALLNEST_API_ALLOWED_HOSTS);
 
 const server = Bun.serve({
   port,
   hostname: "127.0.0.1",
   async fetch(request) {
+    const blocked = validateLocalRequest(request, { port, extraAllowedHosts });
+    if (blocked) return blocked;
+
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method;
