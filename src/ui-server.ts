@@ -12,6 +12,7 @@ import { archiveDirtyBriefAsset, assetSummaryLine, buildBriefAsset, buildPinAsse
 import { indexAsset, indexPinnedAsset } from "./asset-sync.js";
 import { createComponentResolver, loadConfig, loadDotEnv } from "./runtime-config.js";
 import { buildRetrievalContext, resolveScopeSelection } from "./scope-policy.js";
+import { parseAllowedHostsEnv, validateLocalRequest } from "./server-csrf.js";
 const config = (loadDotEnv(), loadConfig());
 const getComponents = createComponentResolver(config);
 
@@ -186,10 +187,16 @@ async function handleSearch(mode: "search" | "explain" | "distill", body: Record
   });
 }
 
+const uiPort = readLimit(process.env.RECALLNEST_UI_PORT, 4317, 1, 65535);
+const uiExtraAllowedHosts = parseAllowedHostsEnv(process.env.RECALLNEST_UI_ALLOWED_HOSTS);
+
 const server = Bun.serve({
-  port: readLimit(process.env.RECALLNEST_UI_PORT, 4317, 1, 65535),
+  port: uiPort,
   hostname: process.env.RECALLNEST_UI_HOST ?? "127.0.0.1",
   async fetch(request) {
+    const blocked = validateLocalRequest(request, { port: uiPort, extraAllowedHosts: uiExtraAllowedHosts });
+    if (blocked) return blocked;
+
     try {
       const url = new URL(request.url);
 
