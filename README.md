@@ -16,7 +16,7 @@ A local-first memory system backed by LanceDB that turns scattered conversation 
 [![Tests](https://img.shields.io/badge/Tests-1428_pass-brightgreen)](https://github.com/erinlkolp/recallnest)
 [![CC Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet)](https://github.com/erinlkolp/recallnest)
 
-**English** | [简体中文](README_CN.md) | [Roadmap](ROADMAP.md)
+**English** | [Roadmap](ROADMAP.md)
 
 </div>
 
@@ -56,18 +56,7 @@ RecallNest starts automatically with Claude Code. No manual MCP config needed.
 
 > **Requires:** [Bun](https://bun.sh) (recommended) or Node.js 18+. Dependencies install on first start.
 
-### Option B: npm install
-
-```bash
-npx recallnest --help          # run directly
-# or
-npm install -g recallnest      # install globally
-recallnest doctor
-```
-
-Works with Node.js 18+ (via tsx) or Bun. No git clone needed.
-
-### Option C: Manual setup
+### Option B: Manual setup
 
 ```bash
 git clone https://github.com/erinlkolp/recallnest.git
