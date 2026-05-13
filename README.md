@@ -8,13 +8,13 @@
 
 A local-first memory system backed by LanceDB that turns scattered conversation history into reusable knowledge — shared across your coding agents, recalled automatically.
 
-[![GitHub](https://img.shields.io/github/stars/AliceLJY/recallnest?style=social)](https://github.com/AliceLJY/recallnest)
+[![GitHub](https://img.shields.io/github/stars/erinlkolp/recallnest?style=social)](https://github.com/erinlkolp/recallnest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Runtime](https://img.shields.io/badge/Runtime-Bun_|_Node.js_18+-f9f1e1?logo=bun)](https://bun.sh)
 [![LanceDB](https://img.shields.io/badge/LanceDB-Vector+FTS-orange)](https://lancedb.com)
 [![MCP](https://img.shields.io/badge/MCP-41_tools-blue)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/Tests-1428_pass-brightgreen)](https://github.com/AliceLJY/recallnest)
-[![CC Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet)](https://github.com/AliceLJY/recallnest)
+[![Tests](https://img.shields.io/badge/Tests-1428_pass-brightgreen)](https://github.com/erinlkolp/recallnest)
+[![CC Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet)](https://github.com/erinlkolp/recallnest)
 
 **English** | [简体中文](README_CN.md) | [Roadmap](ROADMAP.md)
 
@@ -48,8 +48,8 @@ Wins or ties in **all 6 categories**, with no regression. The hybrid retrieval p
 ### Option A: Claude Code Plugin (recommended)
 
 ```bash
-/plugin marketplace add AliceLJY/recallnest
-/plugin install recallnest@AliceLJY
+/plugin marketplace add erinlkolp/recallnest
+/plugin install recallnest@erinlkolp
 ```
 
 RecallNest starts automatically with Claude Code. No manual MCP config needed.
@@ -70,7 +70,7 @@ Works with Node.js 18+ (via tsx) or Bun. No git clone needed.
 ### Option C: Manual setup
 
 ```bash
-git clone https://github.com/AliceLJY/recallnest.git
+git clone https://github.com/erinlkolp/recallnest.git
 cd recallnest
 bun install
 cp config.json.example config.json
@@ -467,25 +467,30 @@ RecallNest is actively maintained. All major architecture phases are complete �
 
 ## Relationship to memory-lancedb-pro
 
-RecallNest started as a fork of [memory-lancedb-pro](https://github.com/CortexReach/memory-lancedb-pro) and shares its core ideas around hybrid retrieval, decay modeling, and memory-as-engineering-system. The key difference:
+RecallNest originated as a fork of [memory-lancedb-pro](https://github.com/CortexReach/memory-lancedb-pro) by [@win4r](https://github.com/win4r), and this repository continues that lineage through AliceLJY's RecallNest. It shares the core ideas around hybrid retrieval, decay modeling, and memory-as-engineering-system. The key difference:
 
 - **memory-lancedb-pro** is an OpenClaw plugin — it adds long-term memory to a single OpenClaw agent.
 - **RecallNest** is a standalone memory layer — it serves Claude Code, Codex, and Gemini CLI simultaneously through MCP + HTTP API, with session continuity, structured assets, and conflict management built in.
 
-## Credit
+## Credit & Project Lineage
+
+This repository is a continuation of [RecallNest by AliceLJY](https://github.com/AliceLJY/recallnest), maintained here by [Erin L. Kolp](https://github.com/erinlkolp) after the original author's GitHub account became inactive. Substantial modifications have been made since the fork; see git history for details. The original MIT license terms remain in effect — see [LICENSE](LICENSE).
+
+Upstream lineage:
 
 | Source | Contribution |
 |--------|-------------|
-| [memory-lancedb-pro](https://github.com/CortexReach/memory-lancedb-pro) by [@win4r](https://github.com/win4r) | Fork base — hybrid retrieval, decay modeling, and memory architecture |
-| Claude Code | Foundation and early project scaffolding |
-| OpenAI Codex | Productization and MCP expansion |
+| [RecallNest](https://github.com/AliceLJY/recallnest) by AliceLJY | Direct fork base — productization, MCP tooling, current architecture |
+| [memory-lancedb-pro](https://github.com/CortexReach/memory-lancedb-pro) by [@win4r](https://github.com/win4r) | Foundational work — hybrid retrieval, decay modeling, memory architecture |
+| Claude Code | Early project scaffolding |
+| OpenAI Codex | MCP expansion |
 
-Special thanks to Qin Chao ([@win4r](https://github.com/win4r)) and the [CortexReach](https://github.com/CortexReach) team for the foundational work.
+Special thanks to Qin Chao ([@win4r](https://github.com/win4r)) and the [CortexReach](https://github.com/CortexReach) team for the foundational work, and to AliceLJY for the prior maintainership of RecallNest.
 
 <details>
 <summary><strong>Ecosystem</strong></summary>
 
-Part of the **小试AI** open-source AI workflow:
+The projects below are AliceLJY's separate companion repositories from the **小试AI** open-source AI workflow. They are independent projects, not maintained as part of this fork — listed here for historical context only:
 
 | Project | Description |
 |---------|-------------|

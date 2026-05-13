@@ -1,11 +1,11 @@
 {
-  "name": "AliceLJY",
+  "name": "erinlkolp",
   "owner": {
-    "name": "Alice Jin Ye"
+    "name": "Erin L. Kolp"
   },
   "metadata": {
     "description": "RecallNest — shared memory layer for Claude Code, Codex, and Gemini CLI",
-    "homepage": "https://github.com/AliceLJY/recallnest"
+    "homepage": "https://github.com/erinlkolp/recallnest"
   },
   "plugins": [
     {

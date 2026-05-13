@@ -24,8 +24,9 @@
 
 ## 4. Git Push 规则（重要！）
 
-- **所有 push 只推 origin**（`AliceLJY/recallnest`）
-- **绝对不要 push 到 upstream**（`CortexReach/memory-lancedb-pro`）—— 那是上游公开仓库，推了等于暴露私有改造
+- **所有 push 只推 origin**（`erinlkolp/recallnest`）
+- **绝对不要 push 到 upstream**（`CortexReach/memory-lancedb-pro`）—— 那是上游公开仓库，推了等于暴露下游改造
+- 历史上游 `AliceLJY/recallnest` 已停用（账号已注销），无需也无法推送
 - `trihippo/recallnest` 已停止维护，不再推送
 - 默认 `git push` 即可（默认推 origin）
 - 需要给上游提 PR 时，走 fork + PR 流程，不直接 push
@@ -42,5 +43,5 @@
 ## 6. 测试基线
 
 - 改完代码必须跑 `bun test`，全量通过才能 commit
-- 当前基线：1428 tests / 0 fail
+- 当前基线：1457 tests / 0 fail
 - 新增功能必须配套测试，基线只能涨不能降
