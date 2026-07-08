@@ -14,7 +14,7 @@
  * LLM-driven consolidation for semantic-level maintenance.
  */
 
-import type { MemoryStore } from "./store.js";
+import type { MemoryEntry, MemoryStore } from "./store.js";
 import type { LLMClient } from "./llm-client.js";
 import type { Embedder } from "./embedder.js";
 import { ConsolidationEngine, clusterAndConsolidate, DEFAULT_CONSOLIDATION_CONFIG } from "./consolidation-engine.js";
@@ -26,7 +26,11 @@ import {
   summarizeMemoryHealthPlans,
   parseMemoryHealthMetadata,
   getMemoryHealthAccessCount,
+  type MemoryHealthRebalancePlan,
 } from "./memory-health-rebalance.js";
+
+/** Pin convention: importance >= 0.95 is pinned — mirrors the auto-gc pin guard. */
+const PINNED_IMPORTANCE_THRESHOLD = 0.95;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +82,74 @@ export interface DreamResult {
     mergedCount: number;
     rebalancedCount: number;
     archivedCount: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rebalance phase (3.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recompute tiers/importance for the gathered active entries from their access
+ * patterns, applying at most `config.maxRebalancePerRun` changed plans.
+ *
+ * Pinned memories (importance >= 0.95 — mirrors the auto-gc pin guard) are
+ * excluded both at plan time and at apply time, so a rebalance pass can never
+ * unpin a memory and expose it to the prune phase.
+ */
+async function runRebalancePhase(
+  store: MemoryStore,
+  active: MemoryEntry[],
+  config: DreamConfig,
+): Promise<{ appliedCount: number; detail: string }> {
+  // importance >= 0.95 is pinned — mirrors the auto-gc pin guard.
+  const rebalanceCandidates = active.filter(e => e.importance < PINNED_IMPORTANCE_THRESHOLD);
+
+  let maxAccessCount = 0;
+  let minTimestamp = Number.POSITIVE_INFINITY;
+  let maxTimestamp = Number.NEGATIVE_INFINITY;
+  for (const entry of rebalanceCandidates) {
+    const md = parseMemoryHealthMetadata(entry.metadata);
+    maxAccessCount = Math.max(maxAccessCount, getMemoryHealthAccessCount(md));
+    minTimestamp = Math.min(minTimestamp, entry.timestamp);
+    maxTimestamp = Math.max(maxTimestamp, entry.timestamp);
+  }
+
+  const plans = rebalanceCandidates.map(entry => buildMemoryHealthRebalancePlan(
+    { id: entry.id, importance: entry.importance, timestamp: entry.timestamp, metadata: entry.metadata },
+    { maxAccessCount, minTimestamp, maxTimestamp },
+  ));
+  const changedPlans = plans.filter(p => p.changed).slice(0, config.maxRebalancePerRun);
+
+  const appliedPlans: MemoryHealthRebalancePlan[] = [];
+  for (const plan of changedPlans) {
+    // Freshness guard: consolidation (phase 3) may have archived/merged this
+    // entry since the gather snapshot. Re-read and apply the plan's tier and
+    // importance on top of the CURRENT metadata so we never resurrect a
+    // non-active entry or clobber evolution writes made after gather.
+    const current = await store.getById(plan.id);
+    if (!current || !isActiveMemory(current.metadata)) continue;
+    // Skip entries pinned between gather and apply.
+    if (current.importance >= PINNED_IMPORTANCE_THRESHOLD) continue;
+
+    const nextMetadata: Record<string, unknown> = {
+      ...parseMemoryHealthMetadata(current.metadata),
+      tier: plan.targetTier,
+      importance: plan.nextImportance,
+    };
+    await store.update(plan.id, {
+      importance: plan.nextImportance,
+      metadata: JSON.stringify(nextMetadata),
+    });
+    appliedPlans.push(plan);
+  }
+
+  // Summarize only the plans that were actually applied so the phase detail
+  // never reports backfills/demotions that were skipped by the guards or cap.
+  const summary = summarizeMemoryHealthPlans(appliedPlans);
+  return {
+    appliedCount: appliedPlans.length,
+    detail: `${appliedPlans.length} rebalanced (${summary.tierBackfills} tier backfills, ${summary.deadMemoryDemotions} dead-memory demotions)`,
   };
 }
 
@@ -195,49 +267,9 @@ export async function runDream(params: {
   // =========================================================================
   // Phase 3.5: Rebalance — recompute tiers/importance from access patterns
   // =========================================================================
-  let maxAccessCount = 0;
-  let minTimestamp = Number.POSITIVE_INFINITY;
-  let maxTimestamp = Number.NEGATIVE_INFINITY;
-  for (const entry of active) {
-    const md = parseMemoryHealthMetadata(entry.metadata);
-    maxAccessCount = Math.max(maxAccessCount, getMemoryHealthAccessCount(md));
-    minTimestamp = Math.min(minTimestamp, entry.timestamp);
-    maxTimestamp = Math.max(maxTimestamp, entry.timestamp);
-  }
-
-  const plans = active.map(entry => buildMemoryHealthRebalancePlan(
-    { id: entry.id, importance: entry.importance, timestamp: entry.timestamp, metadata: entry.metadata },
-    { maxAccessCount, minTimestamp, maxTimestamp },
-  ));
-  const changedPlans = plans.filter(p => p.changed).slice(0, config.maxRebalancePerRun);
-
-  let appliedCount = 0;
-  for (const plan of changedPlans) {
-    // Freshness guard: consolidation (phase 3) may have archived/merged this
-    // entry since the gather snapshot. Re-read and apply the plan's tier and
-    // importance on top of the CURRENT metadata so we never resurrect a
-    // non-active entry or clobber evolution writes made after gather.
-    const current = await store.getById(plan.id);
-    if (!current || !isActiveMemory(current.metadata)) continue;
-
-    const nextMetadata: Record<string, unknown> = {
-      ...parseMemoryHealthMetadata(current.metadata),
-      tier: plan.targetTier,
-      importance: plan.nextImportance,
-    };
-    await store.update(plan.id, {
-      importance: plan.nextImportance,
-      metadata: JSON.stringify(nextMetadata),
-    });
-    appliedCount++;
-  }
-  stats.rebalancedCount = appliedCount;
-
-  const rebalanceSummary = summarizeMemoryHealthPlans(plans);
-  phases.push({
-    phase: "rebalance",
-    detail: `${appliedCount} rebalanced (${rebalanceSummary.tierBackfills} tier backfills, ${rebalanceSummary.deadMemoryDemotions} dead-memory demotions)`,
-  });
+  const rebalance = await runRebalancePhase(store, active, config);
+  stats.rebalancedCount = rebalance.appliedCount;
+  phases.push({ phase: "rebalance", detail: rebalance.detail });
 
   // =========================================================================
   // Phase 4: Prune — archive low-value memories

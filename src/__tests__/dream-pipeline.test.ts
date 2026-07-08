@@ -298,6 +298,68 @@ describe("runDream rebalance phase", () => {
     // All 4 plans changed, but "stale" was skipped at apply time.
     expect(result.stats.rebalancedCount).toBe(3);
   });
+
+  it("never rebalances pinned memories", async () => {
+    // Pinned entry (importance 0.95) with accessCount 0 — worst case: without
+    // the pin exclusion it would be demoted to peripheral and thereby unpinned.
+    const pinned = makeEntry({ id: "pinned", importance: 0.95 });
+
+    const entries = [pinned, makeEntry({ id: "b" }), makeEntry({ id: "c" }), makeEntry({ id: "d" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // The pinned entry must never receive a rebalance write.
+    expect(updates.some(u => u.id === "pinned" && u.importance !== undefined)).toBe(false);
+    // Only the three unpinned entries count.
+    expect(result.stats.rebalancedCount).toBe(3);
+  });
+
+  it("skips entries pinned between gather and apply", async () => {
+    // "latePin" was 0.4 at gather time but gets pinned (0.95) before apply.
+    const latePin = makeEntry({ id: "latePin", importance: 0.4 });
+
+    const entries = [latePin, makeEntry({ id: "b" }), makeEntry({ id: "c" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+    const originalGetById = store.getById.bind(store);
+    (store as any).getById = async (id: string) => {
+      const entry = await originalGetById(id);
+      if (!entry || id !== "latePin") return entry;
+      return { ...entry, importance: 0.95 };
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // The freshly-pinned entry must be skipped at apply time.
+    expect(updates.some(u => u.id === "latePin" && u.importance !== undefined)).toBe(false);
+    expect(result.stats.rebalancedCount).toBe(2);
+  });
 });
 
 describe("formatDreamResult", () => {
