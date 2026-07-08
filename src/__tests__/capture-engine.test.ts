@@ -307,6 +307,47 @@ describe("persistMemory", () => {
       },
     });
   });
+
+  it("dedupes against a canonical entry that is outside the recency window", async () => {
+    const { deps, storedEntries } = createDeps();
+
+    const oldDurable = {
+      id: "99999999-9999-4999-8999-999999999999",
+      text: "User prefers dark mode",
+      vector: [22, 1, 0],
+      category: "preferences",
+      scope: TEST_SCOPE,
+      importance: 0.7,
+      timestamp: 1_600_000_000_000,
+      metadata: JSON.stringify({
+        source: "manual",
+        capture: "store_memory_schema_v1",
+        boundary: {
+          layer: "durable",
+          authority: "structured-memory",
+          conflictPolicy: "latest-wins",
+          originalCategory: "preferences",
+        },
+        canonicalKey: "preferences:user-prefers-dark-mode",
+      }),
+    };
+
+    // Simulates a grown store: the recency-windowed list no longer surfaces
+    // the old entry, but the canonical-key lookup does.
+    (deps.store as any).list = async () => [];
+    (deps.store as any).listByCanonicalKey = async (key: string) =>
+      key === "preferences:user-prefers-dark-mode" ? [oldDurable] : [];
+
+    const result = await persistMemory(deps as any, {
+      text: "User prefers dark mode",
+      category: "preferences",
+      scope: TEST_SCOPE,
+      source: "manual",
+    });
+
+    expect(result.disposition).toBe("deduped");
+    expect(storedEntries).toHaveLength(0);
+  });
 });
 
 describe("persistMemoryBatch", () => {

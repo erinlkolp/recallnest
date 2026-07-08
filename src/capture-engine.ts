@@ -61,7 +61,7 @@ import type { AuditLogger } from "./audit-log.js";
 import { checkAdmission, type ScopeRateLimiter, type AdmissionConfig } from "./admission-control.js";
 import { tagNarrativeIfEnabled } from "./narrative-tagger.js";
 
-type StoreDeps = Pick<MemoryStore, "store"> & Partial<Pick<MemoryStore, "list" | "update" | "getById" | "get" | "vectorSearch">>;
+type StoreDeps = Pick<MemoryStore, "store"> & Partial<Pick<MemoryStore, "list" | "update" | "getById" | "get" | "vectorSearch" | "listByCanonicalKey">>;
 type ConflictStoreDeps = Pick<ConflictCandidateStore, "save" | "replace" | "getOpenByFingerprint" | "getLatestByFingerprint">;
 
 export interface PersistMemoryDeps {
@@ -432,6 +432,11 @@ async function findCanonicalMatches(
   store: StoreDeps,
   canonicalKey: string,
 ): Promise<MemoryEntry[]> {
+  if (store.listByCanonicalKey) {
+    const entries = await store.listByCanonicalKey(canonicalKey);
+    return entries.filter((entry) => extractBoundaryMetadata(entry.metadata)?.layer === "durable");
+  }
+  // Fallback for store deps without canonical lookup: recency-windowed scan.
   if (!store.list) return [];
   const entries = await store.list(undefined, undefined, CANONICAL_SCAN_LIMIT, 0);
   return entries.filter((entry) => {
