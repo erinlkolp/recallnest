@@ -703,9 +703,14 @@ export class MemoryStore {
 
   /**
    * List entries whose metadata carries the exact canonical key.
-   * DB-level LIKE prefilter keeps this O(matches) instead of scanning a
-   * recency window; each candidate is exact-verified by parsing metadata,
-   * so LIKE can only over-match, never wrongly include.
+   * The leading-wildcard LIKE cannot use an index, so the DB still performs a
+   * full scan-filter (O(N) at the storage layer), but only O(matches) rows are
+   * materialized and parsed in JS — strictly cheaper and more correct than the
+   * old approach of parsing up to 1000 recent rows app-side, which silently
+   * missed anything older than the window. Each candidate is exact-verified by
+   * parsing metadata, so LIKE can only over-match, never wrongly include. If
+   * durable-write volume grows, the scaling fix is a scalar index or a
+   * dedicated canonicalKey column.
    */
   async listByCanonicalKey(canonicalKey: string): Promise<MemoryEntry[]> {
     await this.ensureInitialized();
