@@ -21,6 +21,12 @@ import { ConsolidationEngine, clusterAndConsolidate, DEFAULT_CONSOLIDATION_CONFI
 import { maybeRunGc, type GcResult, type AutoGcConfig, DEFAULT_AUTO_GC_CONFIG } from "./auto-gc.js";
 import { getWriteCount, resetWriteCount } from "./activity-counter.js";
 import { isActiveMemory } from "./memory-evolution.js";
+import {
+  buildMemoryHealthRebalancePlan,
+  summarizeMemoryHealthPlans,
+  parseMemoryHealthMetadata,
+  getMemoryHealthAccessCount,
+} from "./memory-health-rebalance.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +43,8 @@ export interface DreamConfig {
   extractPatterns: boolean;
   /** Max entries to scan per consolidation run (default: 500) */
   maxEntriesPerRun: number;
+  /** Max entries to rebalance (tier/importance) per dream run (default: 200) */
+  maxRebalancePerRun: number;
   /** GC config for prune phase */
   gc: AutoGcConfig;
 }
@@ -47,11 +55,12 @@ export const DEFAULT_DREAM_CONFIG: DreamConfig = {
   minClusterSize: 3,
   extractPatterns: true,
   maxEntriesPerRun: 500,
+  maxRebalancePerRun: 200,
   gc: DEFAULT_AUTO_GC_CONFIG,
 };
 
 export interface DreamPhaseResult {
-  phase: "orient" | "gather" | "consolidate" | "prune";
+  phase: "orient" | "gather" | "consolidate" | "rebalance" | "prune";
   detail: string;
 }
 
@@ -67,6 +76,7 @@ export interface DreamResult {
     insightsGenerated: number;
     patternsExtracted: number;
     mergedCount: number;
+    rebalancedCount: number;
     archivedCount: number;
   };
 }
@@ -96,6 +106,7 @@ export async function runDream(params: {
     insightsGenerated: 0,
     patternsExtracted: 0,
     mergedCount: 0,
+    rebalancedCount: 0,
     archivedCount: 0,
   };
 
@@ -139,6 +150,7 @@ export async function runDream(params: {
 
   if (active.length < config.minClusterSize) {
     phases.push({ phase: "consolidate", detail: "skipped — too few active entries" });
+    phases.push({ phase: "rebalance", detail: "skipped — too few active entries" });
     phases.push({ phase: "prune", detail: "skipped — too few entries for GC" });
     resetWriteCount();
     return { ran: true, reason: "completed_early", phases, stats };
@@ -181,6 +193,39 @@ export async function runDream(params: {
   });
 
   // =========================================================================
+  // Phase 3.5: Rebalance — recompute tiers/importance from access patterns
+  // =========================================================================
+  let maxAccessCount = 0;
+  let minTimestamp = Number.POSITIVE_INFINITY;
+  let maxTimestamp = Number.NEGATIVE_INFINITY;
+  for (const entry of active) {
+    const md = parseMemoryHealthMetadata(entry.metadata);
+    maxAccessCount = Math.max(maxAccessCount, getMemoryHealthAccessCount(md));
+    minTimestamp = Math.min(minTimestamp, entry.timestamp);
+    maxTimestamp = Math.max(maxTimestamp, entry.timestamp);
+  }
+
+  const plans = active.map(entry => buildMemoryHealthRebalancePlan(
+    { id: entry.id, importance: entry.importance, timestamp: entry.timestamp, metadata: entry.metadata },
+    { maxAccessCount, minTimestamp, maxTimestamp },
+  ));
+  const changedPlans = plans.filter(p => p.changed).slice(0, config.maxRebalancePerRun);
+
+  for (const plan of changedPlans) {
+    await store.update(plan.id, {
+      importance: plan.nextImportance,
+      metadata: JSON.stringify(plan.nextMetadata),
+    });
+  }
+  stats.rebalancedCount = changedPlans.length;
+
+  const rebalanceSummary = summarizeMemoryHealthPlans(plans);
+  phases.push({
+    phase: "rebalance",
+    detail: `${changedPlans.length} rebalanced (${rebalanceSummary.tierBackfills} tier backfills, ${rebalanceSummary.deadMemoryDemotions} dead-memory demotions)`,
+  });
+
+  // =========================================================================
   // Phase 4: Prune — archive low-value memories
   // =========================================================================
   const gcResult = await maybeRunGc(store, config.gc);
@@ -220,6 +265,7 @@ export function formatDreamResult(result: DreamResult): string {
     `  Insights: ${result.stats.insightsGenerated}`,
     `  Patterns: ${result.stats.patternsExtracted}`,
     `  Merged: ${result.stats.mergedCount}`,
+    `  Rebalanced: ${result.stats.rebalancedCount}`,
     `  Archived: ${result.stats.archivedCount}`,
   ];
 

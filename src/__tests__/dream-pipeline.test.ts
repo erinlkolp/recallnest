@@ -131,8 +131,8 @@ describe("runDream", () => {
     });
 
     expect(result.ran).toBe(true);
-    expect(result.phases.length).toBe(4);
-    expect(result.phases.map(p => p.phase)).toEqual(["orient", "gather", "consolidate", "prune"]);
+    expect(result.phases.length).toBe(5);
+    expect(result.phases.map(p => p.phase)).toEqual(["orient", "gather", "consolidate", "rebalance", "prune"]);
   });
 
   it("completes early with too few active entries", async () => {
@@ -197,13 +197,64 @@ describe("runDream", () => {
   });
 });
 
+describe("runDream rebalance phase", () => {
+  beforeEach(() => {
+    resetWriteCount();
+  });
+
+  it("rebalances tiers and importance for active entries", async () => {
+    // Entry with accesses but no tier: gets a tier backfill + banded importance.
+    const accessed = makeEntry({ id: "accessed" });
+    accessed.importance = 0.2;
+    accessed.metadata = JSON.stringify({
+      accessCount: 4,
+      evolution: {
+        status: "active", version: 1, accessCount: 4, lastAccessedAt: Date.now(),
+        supersededBy: null, consolidatedInto: null, contributedToPattern: null,
+        sourceMemories: [], validFrom: Date.now(), validUntil: null,
+      },
+    });
+
+    const entries = [accessed, makeEntry({ id: "b" }), makeEntry({ id: "c" }), makeEntry({ id: "d" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.phases.some(p => p.phase === "rebalance")).toBe(true);
+    expect(result.stats.rebalancedCount).toBeGreaterThan(0);
+
+    // The deterministic consolidation phase may write metadata-only updates to
+    // "accessed" first (it wins canonical selection); the rebalance update is the
+    // one that carries importance.
+    const accessedUpdate = updates.find(u => u.id === "accessed" && u.importance !== undefined);
+    expect(accessedUpdate).toBeDefined();
+    // accessCount 4, no stored tier → "working" band [0.6, 0.8]
+    expect(accessedUpdate!.importance).toBeGreaterThanOrEqual(0.6);
+    expect(accessedUpdate!.importance).toBeLessThanOrEqual(0.8);
+    expect(JSON.parse(accessedUpdate!.metadata!).tier).toBe("working");
+  });
+});
+
 describe("formatDreamResult", () => {
   it("formats skipped dream", () => {
     const result: DreamResult = {
       ran: false,
       reason: "insufficient_writes (3/10)",
       phases: [{ phase: "orient", detail: "50 memories, 3 writes" }],
-      stats: { totalMemories: 50, activeMemories: 0, writesSinceLastDream: 3, clustersFound: 0, insightsGenerated: 0, patternsExtracted: 0, mergedCount: 0, archivedCount: 0 },
+      stats: { totalMemories: 50, activeMemories: 0, writesSinceLastDream: 3, clustersFound: 0, insightsGenerated: 0, patternsExtracted: 0, mergedCount: 0, rebalancedCount: 0, archivedCount: 0 },
     };
     const output = formatDreamResult(result);
     expect(output).toContain("skipped");
@@ -217,9 +268,10 @@ describe("formatDreamResult", () => {
         { phase: "orient", detail: "100 memories, 15 writes" },
         { phase: "gather", detail: "80 active entries" },
         { phase: "consolidate", detail: "3 clusters, 1 merged, 2 insights, 1 pattern" },
+        { phase: "rebalance", detail: "4 rebalanced (2 tier backfills, 1 dead-memory demotions)" },
         { phase: "prune", detail: "5 entries archived" },
       ],
-      stats: { totalMemories: 100, activeMemories: 80, writesSinceLastDream: 15, clustersFound: 3, insightsGenerated: 2, patternsExtracted: 1, mergedCount: 1, archivedCount: 5 },
+      stats: { totalMemories: 100, activeMemories: 80, writesSinceLastDream: 15, clustersFound: 3, insightsGenerated: 2, patternsExtracted: 1, mergedCount: 1, rebalancedCount: 4, archivedCount: 5 },
     };
     const output = formatDreamResult(result);
     expect(output).toContain("Dream completed");
