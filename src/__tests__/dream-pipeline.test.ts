@@ -246,6 +246,58 @@ describe("runDream rebalance phase", () => {
     expect(accessedUpdate!.importance).toBeLessThanOrEqual(0.8);
     expect(JSON.parse(accessedUpdate!.metadata!).tier).toBe("working");
   });
+
+  it("skips entries that became non-active between gather and rebalance", async () => {
+    const accessedMetadata = () => JSON.stringify({
+      accessCount: 4,
+      evolution: {
+        status: "active", version: 1, accessCount: 4, lastAccessedAt: Date.now(),
+        supersededBy: null, consolidatedInto: null, contributedToPattern: null,
+        sourceMemories: [], validFrom: Date.now(), validUntil: null,
+      },
+    });
+    const stale = makeEntry({ id: "stale", importance: 0.2, metadata: accessedMetadata() });
+    const fresh = makeEntry({ id: "fresh", importance: 0.2, metadata: accessedMetadata() });
+
+    const entries = [stale, fresh, makeEntry({ id: "b" }), makeEntry({ id: "c" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+    // Simulate consolidation having archived "stale" after the gather snapshot:
+    // list still returned it as active, but a fresh getById sees it consolidated.
+    const originalGetById = store.getById.bind(store);
+    (store as any).getById = async (id: string) => {
+      const entry = await originalGetById(id);
+      if (!entry || id !== "stale") return entry;
+      const md = JSON.parse(entry.metadata || "{}");
+      md.evolution = { ...md.evolution, status: "consolidated" };
+      return { ...entry, metadata: JSON.stringify(md) };
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // "stale" must not receive a rebalance write (no update carrying importance).
+    expect(updates.some(u => u.id === "stale" && u.importance !== undefined)).toBe(false);
+    // The guard must not over-skip: "fresh" still gets its tier/importance.
+    const freshUpdate = updates.find(u => u.id === "fresh" && u.importance !== undefined);
+    expect(freshUpdate).toBeDefined();
+    expect(freshUpdate!.importance).toBeGreaterThanOrEqual(0.6);
+    expect(freshUpdate!.importance).toBeLessThanOrEqual(0.8);
+    expect(JSON.parse(freshUpdate!.metadata!).tier).toBe("working");
+    // All 4 plans changed, but "stale" was skipped at apply time.
+    expect(result.stats.rebalancedCount).toBe(3);
+  });
 });
 
 describe("formatDreamResult", () => {

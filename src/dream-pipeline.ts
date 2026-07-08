@@ -211,18 +211,32 @@ export async function runDream(params: {
   ));
   const changedPlans = plans.filter(p => p.changed).slice(0, config.maxRebalancePerRun);
 
+  let appliedCount = 0;
   for (const plan of changedPlans) {
+    // Freshness guard: consolidation (phase 3) may have archived/merged this
+    // entry since the gather snapshot. Re-read and apply the plan's tier and
+    // importance on top of the CURRENT metadata so we never resurrect a
+    // non-active entry or clobber evolution writes made after gather.
+    const current = await store.getById(plan.id);
+    if (!current || !isActiveMemory(current.metadata)) continue;
+
+    const nextMetadata: Record<string, unknown> = {
+      ...parseMemoryHealthMetadata(current.metadata),
+      tier: plan.targetTier,
+      importance: plan.nextImportance,
+    };
     await store.update(plan.id, {
       importance: plan.nextImportance,
-      metadata: JSON.stringify(plan.nextMetadata),
+      metadata: JSON.stringify(nextMetadata),
     });
+    appliedCount++;
   }
-  stats.rebalancedCount = changedPlans.length;
+  stats.rebalancedCount = appliedCount;
 
   const rebalanceSummary = summarizeMemoryHealthPlans(plans);
   phases.push({
     phase: "rebalance",
-    detail: `${changedPlans.length} rebalanced (${rebalanceSummary.tierBackfills} tier backfills, ${rebalanceSummary.deadMemoryDemotions} dead-memory demotions)`,
+    detail: `${appliedCount} rebalanced (${rebalanceSummary.tierBackfills} tier backfills, ${rebalanceSummary.deadMemoryDemotions} dead-memory demotions)`,
   });
 
   // =========================================================================
