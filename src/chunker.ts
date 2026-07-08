@@ -238,7 +238,7 @@ export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUN
       chunks.push(chunk);
       metadatas.push(meta);
     }
-    pos = hardEnd;
+    pos = Math.max(hardEnd, pos + 1);
   }
 
   return {

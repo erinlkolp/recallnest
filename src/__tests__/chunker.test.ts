@@ -22,6 +22,24 @@ describe("chunkDocument tail preservation", () => {
     expect(result.chunks.some(c => c.includes("END_MARKER_XYZ"))).toBe(true);
     const lastMeta = result.metadatas[result.metadatas.length - 1];
     expect(lastMeta.endIndex).toBeGreaterThanOrEqual(text.length - 1);
+
+    // Every chunk respects the size cap.
+    for (const chunk of result.chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(CONVERSATION_LIKE_CONFIG.maxChunkSize);
+    }
+
+    // Coverage starts at (or trivially near) the beginning of the text.
+    expect(result.metadatas[0].startIndex).toBeLessThanOrEqual(2);
+
+    // No-gap coverage: any source text between consecutive chunks is whitespace-only.
+    // Overlap means next.startIndex may be BEFORE prev.endIndex — no gap, passes trivially.
+    for (let i = 1; i < result.metadatas.length; i++) {
+      const prev = result.metadatas[i - 1];
+      const next = result.metadatas[i];
+      if (next.startIndex > prev.endIndex) {
+        expect(text.slice(prev.endIndex, next.startIndex).trim()).toBe("");
+      }
+    }
   });
 
   it("keeps normal prose chunking behavior with overlap", () => {
@@ -35,5 +53,11 @@ describe("chunkDocument tail preservation", () => {
     }
     const lastMeta = result.metadatas[result.metadatas.length - 1];
     expect(lastMeta.endIndex).toBeGreaterThanOrEqual(text.length - 1);
+
+    // At least one consecutive pair actually overlaps.
+    const hasOverlap = result.metadatas.some(
+      (meta, i) => i > 0 && meta.startIndex < result.metadatas[i - 1].endIndex,
+    );
+    expect(hasOverlap).toBe(true);
   });
 });
