@@ -40,7 +40,13 @@ export function resolveSessionScope(sessionId?: string): string | undefined {
 
 export function matchesScopeFilter(rowScope: string, scopeFilter?: string[]): boolean {
   if (!scopeFilter || scopeFilter.length === 0) return true;
-  return scopeFilter.some((scope) => scope.includes(":") ? rowScope === scope : rowScope.startsWith(scope));
+  // Bare scopes match themselves or ":"-separated children only, so a filter
+  // like "cc" never bleeds into sibling families such as "ccx:session1".
+  return scopeFilter.some((scope) =>
+    scope.includes(":")
+      ? rowScope === scope
+      : rowScope === scope || rowScope.startsWith(scope + ":"),
+  );
 }
 
 export interface ScopeSelectionOptions {

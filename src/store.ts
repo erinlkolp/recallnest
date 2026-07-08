@@ -125,6 +125,28 @@ function escapeSqlLiteral(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Build a scope where-clause matching the semantics of matchesScopeFilter:
+ * scopes containing ":" are exact matches; bare scopes match themselves or
+ * ":"-separated children. LIKE wildcards inside scope values are escaped so
+ * "_"/"%" can never widen the match.
+ */
+function buildScopeWhereClause(scopeFilter: string[]): string {
+  const scopeConditions = scopeFilter
+    .map((scope) => {
+      const safe = escapeSqlLiteral(scope);
+      if (scope.includes(":")) return `scope = '${safe}'`;
+      const likeSafe = escapeSqlLiteral(escapeLikePattern(scope));
+      return `(scope = '${safe}' OR scope LIKE '${likeSafe}:%' ESCAPE '\\')`;
+    })
+    .join(" OR ");
+  return `(${scopeConditions})`;
+}
+
 export function classifyLegacyScope(scope: unknown): LegacyScopeIssueKind | undefined {
   if (scope == null) {
     return "missing";
@@ -495,24 +517,15 @@ export class MemoryStore {
   async vectorSearch(vector: number[], limit = 5, minScore = 0.3, scopeFilter?: string[]): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
 
-    const safeLimit = clampInt(limit, 1, 20);
-    const fetchLimit = Math.min(safeLimit * 10, 200); // Over-fetch for scope filtering
+    const safeLimit = clampInt(limit, 1, 100);
+    const fetchLimit = Math.min(safeLimit * 10, 1000); // Over-fetch for scope filtering
 
     let query = this.table!.vectorSearch(vector).distanceType('cosine').limit(fetchLimit);
 
     // Apply scope filter if provided
     // Support both exact match ("cc:abc123") and prefix match ("cc")
     if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map(scope => {
-          const safe = escapeSqlLiteral(scope);
-          // If scope contains ":", treat as exact match; otherwise prefix match
-          return scope.includes(":")
-            ? `scope = '${safe}'`
-            : `scope LIKE '${safe}%'`;
-        })
-        .join(" OR ");
-      query = query.where(`(${scopeConditions})`);
+      query = query.where(buildScopeWhereClause(scopeFilter));
     }
 
     const results = await query.toArray();
@@ -558,7 +571,7 @@ export class MemoryStore {
       return []; // Fallback to vector-only if FTS unavailable
     }
 
-    const safeLimit = clampInt(limit, 1, 20);
+    const safeLimit = clampInt(limit, 1, 100);
 
     try {
       // Use FTS query type explicitly
@@ -566,15 +579,7 @@ export class MemoryStore {
 
       // Apply scope filter if provided (prefix-aware, same as vectorSearch)
       if (scopeFilter && scopeFilter.length > 0) {
-        const scopeConditions = scopeFilter
-          .map(scope => {
-            const safe = escapeSqlLiteral(scope);
-            return scope.includes(":")
-              ? `scope = '${safe}'`
-              : `scope LIKE '${safe}%'`;
-          })
-          .join(" OR ");
-        searchQuery = searchQuery.where(`(${scopeConditions})`);
+        searchQuery = searchQuery.where(buildScopeWhereClause(scopeFilter));
       }
 
       const results = await searchQuery.toArray();
@@ -664,15 +669,7 @@ export class MemoryStore {
     const conditions: string[] = [];
 
     if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map(scope => {
-          const safe = escapeSqlLiteral(scope);
-          return scope.includes(":")
-            ? `scope = '${safe}'`
-            : `scope LIKE '${safe}%'`;
-        })
-        .join(" OR ");
-      conditions.push(`((${scopeConditions}))`);
+      conditions.push(`(${buildScopeWhereClause(scopeFilter)})`);
     }
 
     if (category) {
@@ -689,6 +686,7 @@ export class MemoryStore {
       .toArray();
 
     return results
+      .filter((row) => matchesScopeFilter(((row.scope as string | undefined) ?? ""), scopeFilter))
       .map((row): MemoryEntry => ({
         id: row.id as string,
         text: row.text as string,
@@ -815,18 +813,11 @@ export class MemoryStore {
     let query = this.table!.query();
 
     if (scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map(scope => {
-          const safe = escapeSqlLiteral(scope);
-          return scope.includes(":")
-            ? `scope = '${safe}'`
-            : `scope LIKE '${safe}%'`;
-        })
-        .join(" OR ");
-      query = query.where(`((${scopeConditions}))`);
+      query = query.where(`(${buildScopeWhereClause(scopeFilter)})`);
     }
 
-    const results = await query.select(["scope", "category"]).toArray();
+    const results = (await query.select(["scope", "category"]).toArray())
+      .filter((row) => matchesScopeFilter(((row.scope as string | undefined) ?? ""), scopeFilter));
 
     const scopeCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
@@ -951,10 +942,13 @@ export class MemoryStore {
       }
     }
 
-    // LanceDB doesn't support in-place update; delete + re-add
-    const resolvedId = escapeSqlLiteral(row.id as string);
-    await this.table!.delete(`id = '${resolvedId}'`);
-    await this.table!.add([updated]);
+    // Atomic upsert: a delete-then-add pair loses the row if the process
+    // dies (or the add fails) between the two operations.
+    await this.table!
+      .mergeInsert("id")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute([updated]);
 
     return updated;
   }
@@ -965,15 +959,7 @@ export class MemoryStore {
     const conditions: string[] = [];
 
     if (scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map(scope => {
-          const safe = escapeSqlLiteral(scope);
-          return scope.includes(":")
-            ? `scope = '${safe}'`
-            : `scope LIKE '${safe}%'`;
-        })
-        .join(" OR ");
-      conditions.push(`(${scopeConditions})`);
+      conditions.push(buildScopeWhereClause(scopeFilter));
     }
 
     if (beforeTimestamp) {
@@ -986,16 +972,23 @@ export class MemoryStore {
 
     const whereClause = conditions.join(" AND ");
 
-    // Count first
-    const countResults = await this.table!.query().where(whereClause).toArray();
-    const deleteCount = countResults.length;
+    // Resolve candidates first and delete by exact id, so SQL-layer scope
+    // matching can never over-delete rows outside the requested scopes.
+    const candidates = await this.table!.query().select(["id", "scope"]).where(whereClause).toArray();
+    const ids = candidates
+      .filter((row) => scopeFilter.length === 0 || matchesScopeFilter(((row.scope as string | undefined) ?? ""), scopeFilter))
+      .map((row) => row.id as string);
 
-    // Then delete
-    if (deleteCount > 0) {
-      await this.table!.delete(whereClause);
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids
+        .slice(i, i + CHUNK_SIZE)
+        .map((id) => `'${escapeSqlLiteral(id)}'`)
+        .join(", ");
+      await this.table!.delete(`id IN (${chunk})`);
     }
 
-    return deleteCount;
+    return ids.length;
   }
 
   get hasFtsSupport(): boolean {

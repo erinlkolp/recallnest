@@ -688,7 +688,7 @@ export class MemoryRetriever {
 
   async retrieve(context: RetrievalContext): Promise<RetrievalResultSet> {
     const { query, limit, scopeFilter, category, includeArchived, trace, graph } = context;
-    const safeLimit = clampInt(limit, 1, 20);
+    const safeLimit = clampInt(limit, 1, 100);
 
     // Adaptive retrieval: skip trivial queries to save embedding API calls
     if (shouldSkipRetrieval(query)) {

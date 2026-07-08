@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -46,6 +46,22 @@ describe("SessionCheckpointStore", () => {
       expect(latestByScope?.checkpointId).toBe(second.checkpointId);
       expect(latestBySession?.checkpointId).toBe(first.checkpointId);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates write failures instead of silently reporting success", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "recallnest-checkpoints-readonly-"));
+    try {
+      const store = new SessionCheckpointStore(dir);
+      chmodSync(dir, 0o555);
+
+      await expect(store.save(buildSessionCheckpointRecord({
+        sessionId: "session-readonly",
+        summary: "This checkpoint must not be reported as saved",
+      }))).rejects.toThrow();
+    } finally {
+      chmodSync(dir, 0o755);
       rmSync(dir, { recursive: true, force: true });
     }
   });
