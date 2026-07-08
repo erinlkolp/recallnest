@@ -963,3 +963,16 @@ Expected: 0 fail, total > 1470. Update the CLAUDE.md test-baseline line (`当前
 - [ ] **Step 7.2: Hand off**
 
 Do NOT push or open a PR without explicit approval. Push target is `origin` only (never `upstream`). Report: fixed bug list, new test count, branch name.
+
+---
+
+## Follow-ups recorded during execution (reviewer findings accepted as out-of-wave)
+
+1. **Chunker guard calibration (Task 2 review).** `maxGuard` in `src/chunker.ts:179` still under-estimates iterations for line-dense input, so such input is largely hard-split by the flush backstop (bypassing `maxLinesPerChunk`/semantic splitting). Deliberately NOT loosened in-wave: a loose guard would emit hundreds of tiny overlapping semantic chunks (~30x embedding calls, retrieval pollution). Data loss is impossible either way (locked by tests). Revisit guard math if chunk quality on line-dense input matters.
+2. **Canonical lookup scaling (Task 4 review).** `listByCanonicalKey` is a full LanceDB scan-filter (leading-wildcard LIKE cannot index). Fine at current volumes; the scaling fix is a scalar index or a dedicated `canonicalKey` column. Also note: the unbounded lookup can surface cross-scope canonical matches the old 1000-row window happened to miss — more correct, but a behavioral broadening.
+3. **`maybeConsolidate` is still unwired (Task 5 review).** Its `stats.total` drift is fixed and tested, but no production code calls `maybeConsolidate` — the dream pipeline uses `ConsolidationEngine`/`clusterAndConsolidate` directly. Decide: wire it into a write-path trigger, or delete it as redundant with the dream pipeline.
+4. **Auto-GC scan window direction (Task 5 review).** GC scans the NEWEST 5000 rows (`store.list` sorts timestamp-desc) but archives OLD memories, so on stores >5000 rows the prime archive candidates are never scanned. Pre-existing, now live. Fix: oldest-first ordering or pagination for the GC path.
+5. **Auto-GC scope semantics (Task 5 review).** `runDream(scope)` gathers per-scope but `maybeRunGc` runs globally — a dream for one project can archive (reversibly, ≤100/run) memories from another. Document or scope it intentionally.
+6. **Embedder error-detection regex (Task 3 review).** `/context|too long|exceed|length/i` is over-broad (bare `length`); the depth guard bounds the damage, but tightening the regex is cheap hardening. Batch post-chunking failure at `src/embedder.ts:515` also lacks `{ cause }`.
+7. **Noise-filter residual (Task 1 review).** Short (<gate) substantive texts containing a denial phrase are still dropped — inherent to the length-gate design. If it matters, require the pattern to dominate the text instead.
+8. **No typecheck step exists.** The repo has no tsconfig/tsc step (Bun strips types), which is how the `stats.total` drift and the missing `MemoryEntry` import survived. Typed mocks alone can't enforce anything without it. Consider adding `tsc --noEmit` to CI as its own task.
