@@ -80,7 +80,11 @@ export class SessionCheckpointStore {
     try {
       writeFileSync(path, JSON.stringify(parsed, null, 2) + "\n");
     } catch (err) {
-      console.error("[recallnest] Failed to save session checkpoint:", err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[recallnest] Failed to save session checkpoint:", message);
+      // Propagate so callers never report a checkpoint as saved when the
+      // continuity handoff was actually lost.
+      throw new Error(`Failed to save session checkpoint: ${message}`, { cause: err });
     }
     return parsed;
   }
