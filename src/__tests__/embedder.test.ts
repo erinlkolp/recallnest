@@ -120,3 +120,31 @@ describe("Embedder transient retry", () => {
     expect(maxInFlight).toBe(1);
   });
 });
+
+describe("Embedder chunking recursion guard", () => {
+  it("fails cleanly instead of recursing when chunks still exceed the context limit", async () => {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "text-embedding-3-small",
+      dimensions: 3,
+    });
+
+    let calls = 0;
+    (embedder as any).client = {
+      embeddings: {
+        create: async () => {
+          calls += 1;
+          throw new Error("This model's maximum context length has been exceeded");
+        },
+      },
+    };
+
+    // Long enough that smartChunk splits it; every chunk also "exceeds" the limit.
+    const text = "word ".repeat(3000);
+
+    await expect(embedder.embedPassage(text)).rejects.toThrow(/Failed to generate embedding/);
+    // 1 original attempt + one attempt per first-level chunk; must not grow unbounded.
+    expect(calls).toBeLessThan(20);
+  }, 10_000);
+});

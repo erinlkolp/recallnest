@@ -44,7 +44,6 @@ function createMockStore(entries: MemoryEntry[]): MemoryStore {
     async stats() {
       return {
         totalCount: stored.length,
-        total: stored.length,
         scopeCounts: {},
         categoryCounts: {},
       };
@@ -132,8 +131,8 @@ describe("runDream", () => {
     });
 
     expect(result.ran).toBe(true);
-    expect(result.phases.length).toBe(4);
-    expect(result.phases.map(p => p.phase)).toEqual(["orient", "gather", "consolidate", "prune"]);
+    expect(result.phases.length).toBe(5);
+    expect(result.phases.map(p => p.phase)).toEqual(["orient", "gather", "consolidate", "rebalance", "prune"]);
   });
 
   it("completes early with too few active entries", async () => {
@@ -198,13 +197,178 @@ describe("runDream", () => {
   });
 });
 
+describe("runDream rebalance phase", () => {
+  beforeEach(() => {
+    resetWriteCount();
+  });
+
+  it("rebalances tiers and importance for active entries", async () => {
+    // Entry with accesses but no tier: gets a tier backfill + banded importance.
+    const accessed = makeEntry({ id: "accessed" });
+    accessed.importance = 0.2;
+    accessed.metadata = JSON.stringify({
+      accessCount: 4,
+      evolution: {
+        status: "active", version: 1, accessCount: 4, lastAccessedAt: Date.now(),
+        supersededBy: null, consolidatedInto: null, contributedToPattern: null,
+        sourceMemories: [], validFrom: Date.now(), validUntil: null,
+      },
+    });
+
+    const entries = [accessed, makeEntry({ id: "b" }), makeEntry({ id: "c" }), makeEntry({ id: "d" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.phases.some(p => p.phase === "rebalance")).toBe(true);
+    expect(result.stats.rebalancedCount).toBeGreaterThan(0);
+
+    // The deterministic consolidation phase may write metadata-only updates to
+    // "accessed" first (it wins canonical selection); the rebalance update is the
+    // one that carries importance.
+    const accessedUpdate = updates.find(u => u.id === "accessed" && u.importance !== undefined);
+    expect(accessedUpdate).toBeDefined();
+    // accessCount 4, no stored tier → "working" band [0.6, 0.8]
+    expect(accessedUpdate!.importance).toBeGreaterThanOrEqual(0.6);
+    expect(accessedUpdate!.importance).toBeLessThanOrEqual(0.8);
+    expect(JSON.parse(accessedUpdate!.metadata!).tier).toBe("working");
+  });
+
+  it("skips entries that became non-active between gather and rebalance", async () => {
+    const accessedMetadata = () => JSON.stringify({
+      accessCount: 4,
+      evolution: {
+        status: "active", version: 1, accessCount: 4, lastAccessedAt: Date.now(),
+        supersededBy: null, consolidatedInto: null, contributedToPattern: null,
+        sourceMemories: [], validFrom: Date.now(), validUntil: null,
+      },
+    });
+    const stale = makeEntry({ id: "stale", importance: 0.2, metadata: accessedMetadata() });
+    const fresh = makeEntry({ id: "fresh", importance: 0.2, metadata: accessedMetadata() });
+
+    const entries = [stale, fresh, makeEntry({ id: "b" }), makeEntry({ id: "c" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+    // Simulate consolidation having archived "stale" after the gather snapshot:
+    // list still returned it as active, but a fresh getById sees it consolidated.
+    const originalGetById = store.getById.bind(store);
+    (store as any).getById = async (id: string) => {
+      const entry = await originalGetById(id);
+      if (!entry || id !== "stale") return entry;
+      const md = JSON.parse(entry.metadata || "{}");
+      md.evolution = { ...md.evolution, status: "consolidated" };
+      return { ...entry, metadata: JSON.stringify(md) };
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // "stale" must not receive a rebalance write (no update carrying importance).
+    expect(updates.some(u => u.id === "stale" && u.importance !== undefined)).toBe(false);
+    // The guard must not over-skip: "fresh" still gets its tier/importance.
+    const freshUpdate = updates.find(u => u.id === "fresh" && u.importance !== undefined);
+    expect(freshUpdate).toBeDefined();
+    expect(freshUpdate!.importance).toBeGreaterThanOrEqual(0.6);
+    expect(freshUpdate!.importance).toBeLessThanOrEqual(0.8);
+    expect(JSON.parse(freshUpdate!.metadata!).tier).toBe("working");
+    // All 4 plans changed, but "stale" was skipped at apply time.
+    expect(result.stats.rebalancedCount).toBe(3);
+  });
+
+  it("never rebalances pinned memories", async () => {
+    // Pinned entry (importance 0.95) with accessCount 0 — worst case: without
+    // the pin exclusion it would be demoted to peripheral and thereby unpinned.
+    const pinned = makeEntry({ id: "pinned", importance: 0.95 });
+
+    const entries = [pinned, makeEntry({ id: "b" }), makeEntry({ id: "c" }), makeEntry({ id: "d" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // The pinned entry must never receive a rebalance write.
+    expect(updates.some(u => u.id === "pinned" && u.importance !== undefined)).toBe(false);
+    // Only the three unpinned entries count.
+    expect(result.stats.rebalancedCount).toBe(3);
+  });
+
+  it("skips entries pinned between gather and apply", async () => {
+    // "latePin" was 0.4 at gather time but gets pinned (0.95) before apply.
+    const latePin = makeEntry({ id: "latePin", importance: 0.4 });
+
+    const entries = [latePin, makeEntry({ id: "b" }), makeEntry({ id: "c" })];
+    const updates: Array<{ id: string; importance?: number; metadata?: string }> = [];
+    const store = createMockStore(entries);
+    const originalUpdate = store.update.bind(store);
+    (store as any).update = async (id: string, upd: any) => {
+      updates.push({ id, importance: upd.importance, metadata: upd.metadata });
+      return originalUpdate(id, upd);
+    };
+    const originalGetById = store.getById.bind(store);
+    (store as any).getById = async (id: string) => {
+      const entry = await originalGetById(id);
+      if (!entry || id !== "latePin") return entry;
+      return { ...entry, importance: 0.95 };
+    };
+
+    const result = await runDream({
+      store,
+      llm: null,
+      embedder: createMockEmbedder(),
+      scope: "project:test",
+      force: true,
+    });
+
+    expect(result.ran).toBe(true);
+    // The freshly-pinned entry must be skipped at apply time.
+    expect(updates.some(u => u.id === "latePin" && u.importance !== undefined)).toBe(false);
+    expect(result.stats.rebalancedCount).toBe(2);
+  });
+});
+
 describe("formatDreamResult", () => {
   it("formats skipped dream", () => {
     const result: DreamResult = {
       ran: false,
       reason: "insufficient_writes (3/10)",
       phases: [{ phase: "orient", detail: "50 memories, 3 writes" }],
-      stats: { totalMemories: 50, activeMemories: 0, writesSinceLastDream: 3, clustersFound: 0, insightsGenerated: 0, patternsExtracted: 0, mergedCount: 0, archivedCount: 0 },
+      stats: { totalMemories: 50, activeMemories: 0, writesSinceLastDream: 3, clustersFound: 0, insightsGenerated: 0, patternsExtracted: 0, mergedCount: 0, rebalancedCount: 0, archivedCount: 0 },
     };
     const output = formatDreamResult(result);
     expect(output).toContain("skipped");
@@ -218,9 +382,10 @@ describe("formatDreamResult", () => {
         { phase: "orient", detail: "100 memories, 15 writes" },
         { phase: "gather", detail: "80 active entries" },
         { phase: "consolidate", detail: "3 clusters, 1 merged, 2 insights, 1 pattern" },
+        { phase: "rebalance", detail: "4 rebalanced (2 tier backfills, 1 dead-memory demotions)" },
         { phase: "prune", detail: "5 entries archived" },
       ],
-      stats: { totalMemories: 100, activeMemories: 80, writesSinceLastDream: 15, clustersFound: 3, insightsGenerated: 2, patternsExtracted: 1, mergedCount: 1, archivedCount: 5 },
+      stats: { totalMemories: 100, activeMemories: 80, writesSinceLastDream: 15, clustersFound: 3, insightsGenerated: 2, patternsExtracted: 1, mergedCount: 1, rebalancedCount: 4, archivedCount: 5 },
     };
     const output = formatDreamResult(result);
     expect(output).toContain("Dream completed");

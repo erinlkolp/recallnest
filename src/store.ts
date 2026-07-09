@@ -701,6 +701,53 @@ export class MemoryStore {
       .slice(offset, offset + limit);
   }
 
+  /**
+   * List entries whose metadata carries the exact canonical key.
+   * The leading-wildcard LIKE cannot use an index, so the DB still performs a
+   * full scan-filter (O(N) at the storage layer), but only O(matches) rows are
+   * materialized and parsed in JS — strictly cheaper and more correct than the
+   * old approach of parsing up to 1000 recent rows app-side, which silently
+   * missed anything older than the window. Each candidate is exact-verified by
+   * parsing metadata, so LIKE can only over-match, never wrongly include. If
+   * durable-write volume grows, the scaling fix is a scalar index or a
+   * dedicated canonicalKey column.
+   */
+  async listByCanonicalKey(canonicalKey: string): Promise<MemoryEntry[]> {
+    await this.ensureInitialized();
+
+    // Metadata is serialized with JSON.stringify, so the key appears as
+    // "canonicalKey":<json-string>. Build the same fragment for the LIKE.
+    const fragment = `"canonicalKey":${JSON.stringify(canonicalKey)}`;
+    const likeSafe = escapeSqlLiteral(escapeLikePattern(fragment));
+
+    const rows = await this.table!
+      .query()
+      .where(`metadata LIKE '%${likeSafe}%' ESCAPE '\\'`)
+      .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"])
+      .toArray();
+
+    return rows
+      .filter((row) => {
+        try {
+          const parsed = JSON.parse((row.metadata as string) || "{}") as { canonicalKey?: unknown };
+          return parsed.canonicalKey === canonicalKey;
+        } catch {
+          return false;
+        }
+      })
+      .map((row): MemoryEntry => ({
+        id: row.id as string,
+        text: row.text as string,
+        vector: [],
+        category: row.category as MemoryEntry["category"],
+        scope: (row.scope as string | undefined) ?? "",
+        importance: Number(row.importance),
+        timestamp: Number(row.timestamp),
+        metadata: (row.metadata as string) || "{}",
+      }))
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }
+
   async get(id: string, scopeFilter?: string[]): Promise<MemoryEntry | null> {
     await this.ensureInitialized();
 

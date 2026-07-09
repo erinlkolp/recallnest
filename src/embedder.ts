@@ -328,7 +328,7 @@ export class Embedder {
     }
   }
 
-  private async embedSingle(text: string, task?: string): Promise<number[]> {
+  private async embedSingle(text: string, task?: string, depth = 0): Promise<number[]> {
     if (!text || text.trim().length === 0) {
       throw new Error("Cannot embed empty text");
     }
@@ -352,7 +352,7 @@ export class Embedder {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const isContextError = /context|too long|exceed|length/i.test(errorMsg);
 
-      if (isContextError && this._autoChunk) {
+      if (isContextError && this._autoChunk && depth === 0) {
         try {
           logInfo(`Document exceeded context limit (${errorMsg}), attempting chunking...`);
           const chunkResult = smartChunk(text, this._model);
@@ -366,7 +366,7 @@ export class Embedder {
           const chunkEmbeddings = await Promise.all(
             chunkResult.chunks.map(async (chunk, idx) => {
               try {
-                const embedding = await this.embedSingle(chunk, task);
+                const embedding = await this.embedSingle(chunk, task, depth + 1);
                 return { embedding };
               } catch (chunkError) {
                 logWarn(`Failed to embed chunk ${idx}:`, chunkError);
@@ -468,7 +468,7 @@ export class Embedder {
 
               // Embed all chunks in parallel, then average.
               const embeddings = await Promise.all(
-                chunkResult.chunks.map((chunk) => this.embedSingle(chunk, task))
+                chunkResult.chunks.map((chunk) => this.embedSingle(chunk, task, 1))
               );
 
               const avgEmbedding = embeddings.reduce(

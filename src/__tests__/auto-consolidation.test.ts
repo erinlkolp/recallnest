@@ -50,7 +50,9 @@ function createMockStore(entries: MemoryEntry[]) {
       const filtered = [...data.values()].filter(
         e => !scopeFilter || scopeFilter.some(s => e.scope === s),
       );
-      return { total: filtered.length, byCategory: {}, byScope: {} };
+      // Matches the REAL store surface: totalCount (no `total`),
+      // scopeCounts/categoryCounts (not byScope/byCategory).
+      return { totalCount: filtered.length, scopeCounts: {}, categoryCounts: {} };
     },
     hasFtsSupport: false,
   } as any;
@@ -147,6 +149,25 @@ describe("auto-consolidation", () => {
     const result = await maybeConsolidate(store, "project:test", config);
     expect(result.triggered).toBe(true);
     expect(result.consolidation!.originalCount).toBe(60);
+  });
+
+  it("triggers against the real stats() shape (totalCount, no total)", async () => {
+    // Signature-compat guard: the mock's stats() returns ONLY totalCount,
+    // exactly like the real MemoryStore. If production reads stats.total,
+    // currentCount is 0 and consolidation never fires.
+    const entries = Array.from({ length: 60 }, (_, i) =>
+      makeEntry(`id-${i}`, `memory ${i}`),
+    );
+    const store = createMockStore(entries);
+
+    const config: AutoConsolidationConfig = {
+      minNewMemories: 50,
+      minHoursSinceLastRun: 0,
+      consolidation: DEFAULT_AUTO_CONSOLIDATION_CONFIG.consolidation,
+    };
+
+    const result = await maybeConsolidate(store, "project:test", config);
+    expect(result.triggered).toBe(true);
   });
 
   it("respects custom thresholds", async () => {

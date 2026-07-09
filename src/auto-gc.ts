@@ -79,7 +79,7 @@ export async function maybeRunGc(
   auditLogger?: AuditLogger,
 ): Promise<GcResult> {
   const stats = await store.stats();
-  const totalMemories = stats.total ?? 0;
+  const totalMemories = stats.totalCount ?? 0;
 
   // Condition 1: enough memories to warrant GC
   if (totalMemories < config.minMemoryCount) {
@@ -100,7 +100,7 @@ export async function maybeRunGc(
   let totalChecked = 0;
 
   // Scan memories by listing them
-  const entries = await store.list({ limit: 5000 });
+  const entries = await store.list(undefined, undefined, 5000, 0);
   totalChecked = entries.length;
 
   // Pre-compute per-scope active memory counts and cache retention policies.

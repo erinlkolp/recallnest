@@ -81,6 +81,21 @@ const DIAGNOSTIC_ARTIFACT_PATTERNS = [
   /^只回复精确代号/i,
 ];
 
+// Denial/meta patterns are unanchored, so they must only classify a text as
+// noise when the text is short enough to BE the denial/meta-question rather
+// than merely contain one. CJK text carries ~2x information per char, so it
+// gets a lower cap.
+const CONTEXTUAL_NOISE_MAX_LENGTH_LATIN = 120;
+const CONTEXTUAL_NOISE_MAX_LENGTH_CJK = 60;
+const CJK_CHAR_RE = /[㐀-䶿一-鿿]/g;
+
+function contextualNoiseMaxLength(text: string): number {
+  const cjkCount = text.match(CJK_CHAR_RE)?.length ?? 0;
+  return cjkCount > text.length * 0.3
+    ? CONTEXTUAL_NOISE_MAX_LENGTH_CJK
+    : CONTEXTUAL_NOISE_MAX_LENGTH_LATIN;
+}
+
 export interface NoiseFilterOptions {
   /** Filter agent denial responses (default: true) */
   filterDenials?: boolean;
@@ -109,11 +124,14 @@ export function isNoise(text: string, options: NoiseFilterOptions = {}): boolean
     return true;
   }
 
-  if (opts.filterDenials && DENIAL_PATTERNS.some(p => p.test(trimmed))) {
+  const contextualMax = contextualNoiseMaxLength(trimmed);
+  if (opts.filterDenials && trimmed.length <= contextualMax &&
+      DENIAL_PATTERNS.some(p => p.test(trimmed))) {
     logInfo(`[INFO] noise-filter: denial pattern matched: "${trimmed.slice(0, 60)}..."`);
     return true;
   }
-  if (opts.filterMetaQuestions && META_QUESTION_PATTERNS.some(p => p.test(trimmed))) {
+  if (opts.filterMetaQuestions && trimmed.length <= contextualMax &&
+      META_QUESTION_PATTERNS.some(p => p.test(trimmed))) {
     logInfo(`[INFO] noise-filter: meta-question filtered: "${trimmed.slice(0, 60)}..."`);
     return true;
   }

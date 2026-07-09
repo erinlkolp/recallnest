@@ -10,7 +10,7 @@
  * reason is operational hygiene.
  */
 
-import type { MemoryStore } from "./store.js";
+import type { MemoryEntry, MemoryStore } from "./store.js";
 import { ConsolidationEngine, type ConsolidationConfig, type ConsolidationResult, DEFAULT_CONSOLIDATION_CONFIG } from "./consolidation-engine.js";
 import type { LLMClient } from "./llm-client.js";
 import { isLLMConsolidationEnabled, evaluateCluster, executeMergeDecisions } from "./llm-consolidation.js";
@@ -63,7 +63,7 @@ export async function maybeConsolidate(
   llm?: LLMClient | null,
 ): Promise<AutoConsolidationResult> {
   const stats = await store.stats([scope]);
-  const currentCount = stats.total ?? 0;
+  const currentCount = stats.totalCount ?? 0;
 
   // Condition 1: enough new memories since last run
   const newSinceLastRun = currentCount - lastRunMemoryCount;

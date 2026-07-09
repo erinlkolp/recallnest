@@ -189,6 +189,7 @@ export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUN
         chunks.push(chunk);
         metadatas.push(meta);
       }
+      pos = text.length;
       break;
     }
 
@@ -206,7 +207,10 @@ export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUN
         chunks.push(hard.chunk);
         metadatas.push(hard.meta);
       }
-      if (hardEnd >= text.length) break;
+      if (hardEnd >= text.length) {
+        pos = text.length;
+        break;
+      }
       pos = Math.max(hardEnd - config.overlapSize, pos + 1);
       continue;
     }
@@ -214,11 +218,27 @@ export function chunkDocument(text: string, config: ChunkerConfig = DEFAULT_CHUN
     chunks.push(chunk);
     metadatas.push(meta);
 
-    if (end >= text.length) break;
+    if (end >= text.length) {
+      pos = text.length;
+      break;
+    }
 
     // Move forward with overlap.
     const nextPos = Math.max(end - config.overlapSize, pos + 1);
     pos = nextPos;
+  }
+
+  // The guard can trip before the input is consumed (line-dense input makes
+  // per-iteration advance much smaller than maxChunkSize - overlapSize).
+  // Hard-split the remainder so no text is ever silently dropped.
+  while (pos < text.length) {
+    const hardEnd = Math.min(pos + config.maxChunkSize, text.length);
+    const { chunk, meta } = sliceTrimWithIndices(text, pos, hardEnd);
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+      metadatas.push(meta);
+    }
+    pos = Math.max(hardEnd, pos + 1);
   }
 
   return {
