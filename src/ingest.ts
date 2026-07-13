@@ -1094,6 +1094,7 @@ export async function ingestCodexSessions(
       const texts = chunks.map((c) => c.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1159,11 +1160,15 @@ export async function ingestCodexSessions(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if ((fi + 1) % 10 === 0 || fi + 1 === total) {
@@ -1298,6 +1303,7 @@ export async function ingestGeminiSessions(
       const texts = chunks.map((c) => c.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1362,11 +1368,15 @@ export async function ingestGeminiSessions(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if ((fi + 1) % 10 === 0 || fi + 1 === total) {
@@ -1508,6 +1518,7 @@ export async function ingestCCTranscripts(
 
       const chunks = groupTurnsIntoChunks(turns);
       let fileChunks = 0;
+      let fileHadError = false;
 
       // Batch embed + batch store for efficiency
       const texts = chunks.map((c) => c.text);
@@ -1584,11 +1595,15 @@ export async function ingestCCTranscripts(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error in ${file}: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       // Progress
@@ -1661,6 +1676,7 @@ export async function ingestMarkdownFiles(
       const texts = sections.map((s) => s.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1717,11 +1733,15 @@ export async function ingestMarkdownFiles(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding error in ${file}: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if (options.verbose) {
