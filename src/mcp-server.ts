@@ -85,7 +85,8 @@ function shouldRegisterTool(toolName: string): boolean {
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { autoRegisterBabelMemory } from "./language-hook.js";
 import { z, type ZodRawShape } from "zod";
-import type { RetrievalResult } from "./retriever.js";
+import { filterResultSet } from "./retriever.js";
+import type { RetrievalResult, RetrievalResultSet } from "./retriever.js";
 import type { MemoryStore } from "./store.js";
 import { distillResults, formatExplainResults, formatSearchResults, formatBriefResults, formatFullResults, selectBriefSeedResults, summarizeResults } from "./memory-output.js";
 import { archiveDirtyBriefAsset, assetSummaryLine, buildBriefAsset, buildPinAsset, listDirtyBriefAssets, listMemoryAssets, listPinAssets, saveBriefAsset, savePinAsset, writeExportArtifact } from "./memory-assets.js";
@@ -970,9 +971,13 @@ registerTool(
         anchor: `${after || ""}..${before || ""}`,
       };
       if (constraint.startMs || constraint.endMs) {
-        results = results
-          .filter(r => matchesTemporalConstraint(r.entry.timestamp, constraint))
-          .slice(0, limit);
+        // Use filterResultSet so the attached reconstruction survives — a plain
+        // filter/slice would drop it and silently discard the reconstruction.
+        results = filterResultSet(
+          results as RetrievalResultSet,
+          r => matchesTemporalConstraint(r.entry.timestamp, constraint),
+          limit,
+        );
       }
     }
 

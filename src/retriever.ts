@@ -191,6 +191,24 @@ export type RetrievalResultSet = RetrievalResult[] & {
   reconstruction?: ReconstructionOutput;
 };
 
+/**
+ * Filter (and optionally cap) a result set while preserving the attached
+ * `reconstruction`. A plain Array.prototype.filter/slice returns a fresh array
+ * that drops non-index own properties, silently losing the reconstruction that
+ * the retriever attached to the RetrievalResultSet.
+ */
+export function filterResultSet(
+  set: RetrievalResultSet,
+  predicate: (result: RetrievalResult) => boolean,
+  limit?: number,
+): RetrievalResultSet {
+  const filtered = set.filter(predicate);
+  const capped = limit != null ? filtered.slice(0, limit) : filtered;
+  const out = capped as RetrievalResultSet;
+  if (set.reconstruction !== undefined) out.reconstruction = set.reconstruction;
+  return out;
+}
+
 // ============================================================================
 // Default Configuration
 // ============================================================================
