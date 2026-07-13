@@ -581,7 +581,7 @@ function cosine(a: number[], b: number[]): number {
 
 // ─── Pending extraction queue (for when LLM is unavailable) ─────────────────
 
-const PENDING_EXTRACTION_FILE = resolve(
+export const PENDING_EXTRACTION_FILE = resolve(
   dirname(import.meta.url.replace("file://", "")), "..", "data", "pending-extraction.json"
 );
 
@@ -620,6 +620,10 @@ export async function drainPendingQueue(
   if (pending.length === 0) return { processed: 0, errors: 0 };
 
   let processed = 0, errors = 0;
+  // Items whose store() throws are kept so a later drain can retry them —
+  // clearing the whole queue would drop them permanently, defeating the point
+  // of queueing (to survive until extraction/storage succeeds).
+  const failedItems: typeof pending = [];
   for (let i = 0; i < pending.length; i += 20) {
     const batch = pending.slice(i, i + 20);
     const texts = batch.map(c => c.text);
@@ -649,15 +653,16 @@ export async function drainPendingQueue(
           fts_text,
         });
         processed++;
-      } catch { errors++; }
+      } catch { errors++; failedItems.push(batch[j]); }
     }
   }
 
-  // Clear the queue
+  // Rewrite the queue with only the items that failed to store (empty on full
+  // success), rather than unconditionally clearing it.
   try {
-    writeFileSync(PENDING_EXTRACTION_FILE, "[]");
+    writeFileSync(PENDING_EXTRACTION_FILE, JSON.stringify(failedItems, null, 2));
   } catch (err) {
-    console.error("[recallnest] Failed to clear pending extraction queue:", err instanceof Error ? err.message : String(err));
+    console.error("[recallnest] Failed to rewrite pending extraction queue:", err instanceof Error ? err.message : String(err));
   }
   return { processed, errors };
 }
@@ -674,7 +679,7 @@ function initialTier(extraction: Pick<SmartExtraction, "category" | "importance"
   return "peripheral";
 }
 
-function buildIngestedEntry(params: {
+export function buildIngestedEntry(params: {
   source: string;
   scope: string;
   text: string;
@@ -692,6 +697,8 @@ function buildIngestedEntry(params: {
   scope: string;
   importance: number;
   metadata: string;
+  language: string;
+  fts_text: string;
 } {
   const resolution = resolveIngestBoundary({
     source: params.source,
@@ -713,12 +720,21 @@ function buildIngestedEntry(params: {
     sessionId: params.sessionId,
   });
 
+  // Compute language + tokenized FTS text so ingested chunks index the same
+  // way manually-stored (persistMemory) and drained-queue entries do. Without
+  // this, storeBatch falls back to language:"en" + raw (un-tokenized) text,
+  // which breaks CJK lexical/BM25 retrieval for every ingested transcript.
+  const language = detectLang(params.text);
+  const fts_text = tokenizeFts(params.text, language);
+
   return {
     text: params.text,
     vector: params.vector,
     category: resolution.category,
     scope: params.scope,
     importance: params.extraction.importance,
+    language,
+    fts_text,
     metadata: JSON.stringify({
       source: params.source,
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
@@ -1083,6 +1099,7 @@ export async function ingestCodexSessions(
       const texts = chunks.map((c) => c.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1148,11 +1165,15 @@ export async function ingestCodexSessions(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if ((fi + 1) % 10 === 0 || fi + 1 === total) {
@@ -1287,6 +1308,7 @@ export async function ingestGeminiSessions(
       const texts = chunks.map((c) => c.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1351,11 +1373,15 @@ export async function ingestGeminiSessions(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if ((fi + 1) % 10 === 0 || fi + 1 === total) {
@@ -1497,6 +1523,7 @@ export async function ingestCCTranscripts(
 
       const chunks = groupTurnsIntoChunks(turns);
       let fileChunks = 0;
+      let fileHadError = false;
 
       // Batch embed + batch store for efficiency
       const texts = chunks.map((c) => c.text);
@@ -1573,11 +1600,15 @@ export async function ingestCCTranscripts(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding batch error in ${file}: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       // Progress
@@ -1650,6 +1681,7 @@ export async function ingestMarkdownFiles(
       const texts = sections.map((s) => s.text);
       const batchSize = 32;
       let fileChunks = 0;
+      let fileHadError = false;
 
       for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -1706,11 +1738,15 @@ export async function ingestMarkdownFiles(
             fileChunks += toStore.length;
           }
         } catch (err: any) {
+          fileHadError = true;
           result.errors.push(`Embedding error in ${file}: ${err.message}`);
         }
       }
 
-      markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
+      // Only mark the file done if no batch failed. A partial failure would
+      // otherwise strand the failed batch's chunks: the file is skipped on
+      // future incremental runs and those chunks are lost permanently.
+      if (!fileHadError) markProcessed(filePath, stat.size, fileChunks, stat.mtimeMs);
       result.filesProcessed++;
 
       if (options.verbose) {
