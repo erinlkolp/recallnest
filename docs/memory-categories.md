@@ -1,6 +1,6 @@
 # Memory Categories
 
-> 6 类分类体系：RecallNest 自动将每条记忆归入 6 个类别之一，便于过滤和差异化管理。
+> Six-category taxonomy: RecallNest automatically assigns every memory to one of six categories, making it easier to filter and manage them differently.
 
 ## The Six Categories
 
@@ -41,7 +41,7 @@ curl -X POST localhost:4318/v1/search \
   -d '{"query": "Docker crash", "category": "cases"}'
 ```
 
-> 按类别过滤能显著减少噪音：搜 debug 问题时只看 cases，搜用户偏好时只看 preferences。
+> Filtering by category cuts noise significantly: look only at cases when searching debugging problems, and only at preferences when searching user preferences.
 
 ### 2. Different Lifecycle Rules
 
@@ -116,4 +116,4 @@ curl http://localhost:4318/v1/stats
 # or via MCP: memory_stats
 ```
 
-> 如果某个类别占比异常（比如 events 占了 90%），说明分类规则可能需要调优。
+> If one category's share looks abnormal (for example, events accounting for 90%), the classification rules probably need tuning.

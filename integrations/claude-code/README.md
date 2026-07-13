@@ -1,6 +1,6 @@
 # Claude Code Integration
 
-> Claude Code 接入指南：配 MCP + 安装 continuity 规则，让 CC 在新窗口里主动恢复稳定上下文。
+> Claude Code integration guide: configure MCP and install the continuity rules so Claude Code proactively restores stable context in fresh windows.
 
 ## Quick Start
 

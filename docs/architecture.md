@@ -1,12 +1,12 @@
 # Architecture
 
-> 架构总览：RecallNest 的分层设计，从接入层到存储层。
+> Architecture overview: RecallNest's layered design, from the integration layer down to the storage layer.
 
-边界说明：
+Boundary notes:
 
-- structured capture 写 durable memory
-- checkpoint store 写 session state
-- raw ingest 写 evidence
+- structured capture writes durable memory
+- the checkpoint store writes session state
+- raw ingest writes evidence
 
 See [memory-boundary-contract.md](./memory-boundary-contract.md).
 
@@ -104,7 +104,7 @@ Memory .md ─────┘         │
                    └──────────────┘
 ```
 
-> 入库流程：多源文件 → 分块 → 过滤噪音 → 分类 → 嵌入向量 → 存入 LanceDB
+> Ingestion flow: multi-source files → chunking → noise filtering → classification → embedding vectors → stored in LanceDB
 
 ### Search Pipeline
 

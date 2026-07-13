@@ -1,6 +1,6 @@
 # Codex Integration
 
-> Codex 接入指南：一键配 MCP + continuity 规则，让 Codex 在新窗口里主动恢复稳定上下文。
+> Codex integration guide: one-click setup for MCP and continuity rules so Codex proactively restores stable context in fresh windows.
 
 ## Quick Start
 

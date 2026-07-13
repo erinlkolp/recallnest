@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RecallNest 记忆体检仪表盘</title>
+<title>RecallNest Memory Checkup Dashboard</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -92,33 +92,33 @@
 </head>
 <body>
 
-<h1>🧠 RecallNest 记忆体检仪表盘</h1>
-<p class="subtitle">生成时间: 2026-03-19T08:38:04 · 数据来源: LanceDB memories table</p>
+<h1>🧠 RecallNest Memory Checkup Dashboard</h1>
+<p class="subtitle">Generated: 2026-03-19T08:38:04 · Data source: LanceDB memories table</p>
 
 <div class="stats-bar">
   <div class="stat-card">
     <div class="value">38,335</div>
-    <div class="label">总记忆数</div>
+    <div class="label">Total Memories</div>
   </div>
   <div class="stat-card alert">
     <div class="value">96.7%</div>
-    <div class="label">死记忆率</div>
+    <div class="label">Dead Memory Rate</div>
   </div>
   <div class="stat-card">
     <div class="value">9</div>
-    <div class="label">类别数</div>
+    <div class="label">Categories</div>
   </div>
   <div class="stat-card">
     <div class="value">1378</div>
-    <div class="label">Scope 数</div>
+    <div class="label">Scopes</div>
   </div>
   <div class="stat-card">
     <div class="value">0.350</div>
-    <div class="label">平均 Importance</div>
+    <div class="label">Avg Importance</div>
   </div>
   <div class="stat-card">
     <div class="value">2026-03-02</div>
-    <div class="label">最早记忆</div>
+    <div class="label">Earliest Memory</div>
   </div>
 </div>
 
@@ -126,49 +126,49 @@
 
   <!-- 1. Category Distribution -->
   <div class="chart-box">
-    <h3>📊 类别分布</h3>
+    <h3>📊 Category Distribution</h3>
     <div class="chart-container" id="chart-category"></div>
   </div>
 
   <!-- 2. Tier Distribution -->
   <div class="chart-box">
-    <h3>📊 Tier 分布</h3>
+    <h3>📊 Tier Distribution</h3>
     <div class="chart-container" id="chart-tier"></div>
   </div>
 
   <!-- 3. Monthly Timeline -->
   <div class="chart-box full-width">
-    <h3>📈 月度记忆增长</h3>
+    <h3>📈 Monthly Memory Growth</h3>
     <div class="chart-container" id="chart-timeline"></div>
   </div>
 
   <!-- 4. Daily Timeline (last 90 days) -->
   <div class="chart-box full-width">
-    <h3>📈 近 90 天每日记忆量</h3>
+    <h3>📈 Daily Memory Volume (Last 90 Days)</h3>
     <div class="chart-container" id="chart-daily"></div>
   </div>
 
   <!-- 5. Hourly Pattern -->
   <div class="chart-box">
-    <h3>⏰ 小时分布</h3>
+    <h3>⏰ Hourly Distribution</h3>
     <div class="chart-container" id="chart-hourly"></div>
   </div>
 
   <!-- 6. Day of Week -->
   <div class="chart-box">
-    <h3>📅 星期分布</h3>
+    <h3>📅 Day-of-Week Distribution</h3>
     <div class="chart-container" id="chart-dow"></div>
   </div>
 
   <!-- 7. Access Count -->
   <div class="chart-box">
-    <h3>🔍 访问次数分布</h3>
+    <h3>🔍 Access Count Distribution</h3>
     <div class="chart-container" id="chart-access"></div>
   </div>
 
   <!-- 8. Importance Distribution -->
   <div class="chart-box">
-    <h3>⚖️ Importance 分布</h3>
+    <h3>⚖️ Importance Distribution</h3>
     <div class="chart-container" id="chart-importance"></div>
   </div>
 
@@ -180,19 +180,19 @@
 
   <!-- 10. Scope × Category Heatmap -->
   <div class="chart-box full-width">
-    <h3>🗺️ Scope × Category 热力图</h3>
+    <h3>🗺️ Scope × Category Heatmap</h3>
     <div class="chart-container" id="chart-heatmap"></div>
   </div>
 
   <!-- 11. Text Length Distribution -->
   <div class="chart-box">
-    <h3>📏 文本长度分布</h3>
+    <h3>📏 Text Length Distribution</h3>
     <div class="chart-container" id="chart-textlen"></div>
   </div>
 
   <!-- 12. Embedding PCA Scatter -->
   <div class="chart-box full-width">
-    <h3>🧬 Embedding PCA 散点图 (采样 3000 条)</h3>
+    <h3>🧬 Embedding PCA Scatter (sampled 3000)</h3>
     <div class="chart-container tall" id="chart-pca"></div>
   </div>
 
@@ -246,8 +246,8 @@ Plotly.newPlot('chart-tier', [{
   Plotly.newPlot('chart-timeline', traces, {
     ...DARK_LAYOUT,
     barmode: 'stack',
-    xaxis: { title: '月份' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Month' },
+    yaxis: { title: 'Memories' },
     legend: { orientation: 'h', y: -0.2 },
   });
 }
@@ -262,8 +262,8 @@ Plotly.newPlot('chart-tier', [{
     marker: { color: '#00d4ff', opacity: 0.7 },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '日期' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Date' },
+    yaxis: { title: 'Memories' },
   });
 }
 
@@ -279,13 +279,13 @@ Plotly.newPlot('chart-hourly', [{
   },
 }], {
   ...DARK_LAYOUT,
-  xaxis: { title: '小时' },
-  yaxis: { title: '记忆数' },
+  xaxis: { title: 'Hour' },
+  yaxis: { title: 'Memories' },
 });
 
 // 6. Day of Week
 {
-  const dowNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   Plotly.newPlot('chart-dow', [{
     x: dowNames,
     y: DATA.dowData,
@@ -293,8 +293,8 @@ Plotly.newPlot('chart-hourly', [{
     marker: { color: COLORS.slice(0, 7) },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '星期' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Day of Week' },
+    yaxis: { title: 'Memories' },
   });
 }
 
@@ -310,8 +310,8 @@ Plotly.newPlot('chart-access', [{
   },
 }], {
   ...DARK_LAYOUT,
-  xaxis: { title: '访问次数' },
-  yaxis: { title: '记忆数', type: 'log' },
+  xaxis: { title: 'Access Count' },
+  yaxis: { title: 'Memories', type: 'log' },
 });
 
 // 8. Importance Histogram
@@ -328,7 +328,7 @@ Plotly.newPlot('chart-importance', [{
 }], {
   ...DARK_LAYOUT,
   xaxis: { title: 'Importance' },
-  yaxis: { title: '记忆数' },
+  yaxis: { title: 'Memories' },
 });
 
 // 9. Top Scopes
@@ -341,7 +341,7 @@ Plotly.newPlot('chart-scopes', [{
 }], {
   ...DARK_LAYOUT,
   margin: { ...DARK_LAYOUT.margin, l: 250 },
-  xaxis: { title: '记忆数' },
+  xaxis: { title: 'Memories' },
 });
 
 // 10. Heatmap
@@ -367,8 +367,8 @@ Plotly.newPlot('chart-heatmap', [{
     marker: { color: '#1abc9c' },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '字符数' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Characters' },
+    yaxis: { title: 'Memories' },
   });
 }
 

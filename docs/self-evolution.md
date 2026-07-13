@@ -1,6 +1,6 @@
 # Self-Evolution: How RecallNest Memories and Workflows Evolve
 
-> 自我进化原理：RecallNest 不只让记忆自己整合、衰减、上浮，也开始观察 workflow 什么时候做对、什么时候做错。
+> How self-evolution works: RecallNest not only lets memories consolidate, decay, and surface on their own, but also starts to observe when a workflow gets things right and when it gets them wrong.
 
 ## Overview
 
@@ -55,7 +55,7 @@ Every memory lives in one of three tiers:
 | **Working** | Actively useful, moderate access | ~25% of total |
 | **Peripheral** | Rarely accessed, candidates for archival | ~70% of total |
 
-> 三层生命周期：核心层（常用的 5%）→ 工作层（中等频率 25%）→ 边缘层（低频 70%）
+> Three-tier lifecycle: Core tier (the frequently used 5%) → Working tier (medium frequency, 25%) → Peripheral tier (low frequency, 70%)
 
 ### Promotion and Demotion
 
@@ -71,7 +71,7 @@ Memories move between tiers based on access patterns:
 
 RecallNest uses the [Weibull distribution](https://en.wikipedia.org/wiki/Weibull_distribution) for time-based memory decay, inspired by human forgetting curves.
 
-> Weibull 衰减模型比简单的线性衰减更符合人类遗忘曲线：开始衰减慢，后面加速。
+> The Weibull decay model matches the human forgetting curve better than simple linear decay: it starts fading slowly, then accelerates.
 
 ### Why Weibull, not Exponential?
 
@@ -108,7 +108,7 @@ A highly relevant but stale memory can still surface if the semantic match is st
 
 Over time, you accumulate many memories about the same topic. Consolidation merges them.
 
-> 记忆整合：找到主题相近的记忆簇，按策略合并或去重，保持记忆库精简。
+> Memory consolidation: find clusters of memories on similar topics, then merge or deduplicate them by strategy to keep the memory store lean.
 
 ### Merge vs. Append Strategies
 
@@ -143,7 +143,7 @@ Over time, you accumulate many memories about the same topic. Consolidation merg
 
 RecallNest tracks what you search for and notices when searches consistently return poor results.
 
-> 缺口检测：分析搜索日志，找出你经常问但记忆库覆盖不足的主题。
+> Gap detection: analyze the search logs to find topics you ask about often but that the memory store covers poorly.
 
 ### How It Works
 
@@ -170,7 +170,7 @@ Topic: "API rate limiting"
 
 ## Access-Based Surfacing ("Use It or Lose It")
 
-> 用进废退：经常被搜到的记忆权重上升，长期无人问津的权重下降。
+> Use it or lose it: memories that are searched often gain weight, while those left untouched for a long time lose weight.
 
 The access tracker records every time a memory appears in search results. This creates a feedback loop:
 

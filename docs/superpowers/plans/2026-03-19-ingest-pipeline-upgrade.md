@@ -310,7 +310,7 @@ async function distillBatch(
     if (dryRun) {
       // Dry-run: print extraction result, don't write
       console.log(`\n    📝 [${extraction.category}] importance=${extraction.importance}`);
-      console.log(`       原文: ${original.text.slice(0, 80)}...`);
+      console.log(`       Original: ${original.text.slice(0, 80)}...`);
       console.log(`       L0: ${extraction.l0}`);
       console.log(`       L1: ${(extraction.l1 || "").slice(0, 120)}`);
       newCount++;
@@ -377,29 +377,29 @@ async function main() {
   const { store, embedder, llm } = createComponents(config);
 
   if (!llm) {
-    console.error("❌ LLM 未配置，无法进行知识提炼。检查 config.json 的 llm 配置。");
+    console.error("❌ LLM not configured; knowledge extraction cannot run. Check the llm section of config.json.");
     process.exit(1);
   }
 
   // Test LLM connectivity
   const llmTest = await llm.test();
   if (!llmTest.success) {
-    console.error(`❌ LLM 连接失败: ${llmTest.error}`);
+    console.error(`❌ LLM connection failed: ${llmTest.error}`);
     process.exit(1);
   }
   console.log(`✅ LLM: ${config.llm?.model}`);
 
   // Fetch all fact records
-  console.log("\n⏳ 正在读取 fact 记录...");
+  console.log("\n⏳ Reading fact records...");
   const allFacts: MemoryEntry[] = await store.list(undefined, "fact", 50000, 0);
-  console.log(`✅ 共 ${allFacts.length} 条 fact 记录\n`);
+  console.log(`✅ ${allFacts.length} fact records total\n`);
 
   // Filter out already-archived facts
   const unarchived = allFacts.filter(f => {
     if (!f.metadata) return true;
     try { return !JSON.parse(f.metadata).archived; } catch { return true; }
   });
-  console.log(`📋 未归档: ${unarchived.length} 条 (已归档: ${allFacts.length - unarchived.length} 条)\n`);
+  console.log(`📋 Unarchived: ${unarchived.length} (archived: ${allFacts.length - unarchived.length})\n`);
 
   // Group by scope
   const byScope = new Map<string, MemoryEntry[]>();
@@ -409,7 +409,7 @@ async function main() {
     byScope.set(f.scope, arr);
   }
   const scopes = [...byScope.keys()].sort((a, b) => (byScope.get(b)!.length - byScope.get(a)!.length));
-  console.log(`📦 ${scopes.length} 个 scope\n`);
+  console.log(`📦 ${scopes.length} scopes\n`);
 
   // Load or create progress
   let progress = loadProgress();
@@ -427,24 +427,24 @@ async function main() {
   if (scopeArg) {
     targetScopes = scopes.filter(s => s === scopeArg);
     if (targetScopes.length === 0) {
-      console.error(`❌ scope "${scopeArg}" 不存在`);
+      console.error(`❌ scope "${scopeArg}" does not exist`);
       process.exit(1);
     }
   }
   if (dryRun) {
     targetScopes = [targetScopes[0]]; // Only first scope
-    console.log(`🔍 DRY RUN: 只处理 scope "${targetScopes[0]}" (${byScope.get(targetScopes[0])!.length} 条)\n`);
+    console.log(`🔍 DRY RUN: processing only scope "${targetScopes[0]}" (${byScope.get(targetScopes[0])!.length} records)\n`);
   }
 
   // Process scopes
   for (const scope of targetScopes) {
     if (progress.completedScopes.includes(scope)) {
-      console.log(`⏭️  ${scope}: 已处理，跳过`);
+      console.log(`⏭️  ${scope}: already processed, skipping`);
       continue;
     }
 
     const facts = byScope.get(scope)!;
-    console.log(`\n🔄 ${scope}: ${facts.length} 条 fact`);
+    console.log(`\n🔄 ${scope}: ${facts.length} facts`);
 
     // Process in batches
     let scopeNew = 0, scopeDedup = 0, scopeErrors = 0;
@@ -461,7 +461,7 @@ async function main() {
       console.log(` +${result.newCount} new, ${result.dedupCount} dedup, ${result.errors} err`);
     }
 
-    console.log(`  📊 ${scope} 完成: +${scopeNew} 新记忆, ${scopeDedup} 去重, ${scopeErrors} 错误`);
+    console.log(`  📊 ${scope} done: +${scopeNew} new memories, ${scopeDedup} deduped, ${scopeErrors} errors`);
 
     // Update progress
     progress.completedScopes.push(scope);
@@ -478,15 +478,15 @@ async function main() {
 
   // Final summary
   console.log("\n" + "=".repeat(60));
-  console.log("📊 提炼完成汇总:");
-  console.log(`  总 fact 记录: ${progress.stats.totalFacts}`);
-  console.log(`  已处理: ${progress.stats.processedFacts}`);
-  console.log(`  新知识记忆: ${progress.stats.newRecords}`);
-  console.log(`  去重跳过: ${progress.stats.dedupedSkips}`);
-  console.log(`  错误: ${progress.stats.errors}`);
-  console.log(`  压缩比: ${(progress.stats.processedFacts / Math.max(progress.stats.newRecords, 1)).toFixed(1)}:1`);
+  console.log("📊 Distillation summary:");
+  console.log(`  Total fact records: ${progress.stats.totalFacts}`);
+  console.log(`  Processed: ${progress.stats.processedFacts}`);
+  console.log(`  New knowledge memories: ${progress.stats.newRecords}`);
+  console.log(`  Deduped skips: ${progress.stats.dedupedSkips}`);
+  console.log(`  Errors: ${progress.stats.errors}`);
+  console.log(`  Compression ratio: ${(progress.stats.processedFacts / Math.max(progress.stats.newRecords, 1)).toFixed(1)}:1`);
   if (dryRun) {
-    console.log("\n⚠️  DRY RUN 模式，未保存进度。确认质量后去掉 --dry-run 再跑。");
+    console.log("\n⚠️  DRY RUN mode; progress was not saved. Once you confirm the quality, drop --dry-run and run again.");
   }
 }
 
@@ -711,7 +711,7 @@ if (llm) {
 In `src/cli.ts`, add the flag to the ingest command (around line 1287):
 
 ```typescript
-.option("--no-llm", "禁用 LLM 提取（仅用于调试，会跳过原始对话不存入）")
+.option("--no-llm", "Disable LLM extraction (for debugging only; raw conversations are skipped, not stored)")
 ```
 
 And in the action handler (around line 1326):
@@ -725,9 +725,9 @@ Update the LLM status message (around line 1319-1321):
 
 ```typescript
 if (options.noLlm) {
-  console.log("  ⚠️  LLM: 已通过 --no-llm 禁用，原始对话将跳过不存入");
+  console.log("  ⚠️  LLM: disabled via --no-llm; raw conversations will be skipped, not stored");
 } else if (!llm) {
-  console.log("  ⚠️  LLM: 未配置，原始对话将跳过不存入（配置 config.json → llm 以启用）");
+  console.log("  ⚠️  LLM: not configured; raw conversations will be skipped, not stored (configure config.json → llm to enable)");
 }
 ```
 

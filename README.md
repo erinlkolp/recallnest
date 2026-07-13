@@ -479,7 +479,7 @@ Special thanks to Qin Chao ([@win4r](https://github.com/win4r)) and the [CortexR
 <details>
 <summary><strong>Ecosystem</strong></summary>
 
-The projects below are AliceLJY's separate companion repositories from the **小试AI** open-source AI workflow. They are independent projects, not maintained as part of this fork — listed here for historical context only:
+The projects below are AliceLJY's separate companion repositories from the **小试AI** (Xiaoshi AI) open-source AI workflow. They are independent projects, not maintained as part of this fork — listed here for historical context only:
 
 | Project | Description |
 |---------|-------------|

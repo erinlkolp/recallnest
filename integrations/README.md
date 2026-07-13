@@ -1,6 +1,6 @@
 # RecallNest Integrations
 
-> 集成总览：RecallNest 支持任何 AI agent 接入，以下是开箱即用的集成方案。
+> Integration overview: RecallNest works with any AI agent. The options below are ready-to-use integrations.
 
 RecallNest provides two integration paths:
 
@@ -33,7 +33,7 @@ Then call it from your agent:
 | [OpenAI Agents SDK](examples/openai-agents-sdk/) | `memory-agent.py` | Python |
 | [LangChain](examples/langchain/) | `memory-chain.py` | Python |
 
-> 任何能发 HTTP 请求的语言都能接入，以上只是参考示例。
+> Any language that can send HTTP requests can integrate; the examples above are just references.
 
 ## Architecture
 

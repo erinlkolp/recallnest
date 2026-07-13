@@ -1,6 +1,6 @@
 # Gemini CLI Integration
 
-> Gemini CLI 接入指南：一键配 MCP + continuity 规则，让 Gemini CLI 在新窗口里主动恢复稳定上下文。
+> Gemini CLI integration guide: one-click setup for MCP and continuity rules so Gemini CLI proactively restores stable context in fresh windows.
 
 ## Quick Start
 
