@@ -674,7 +674,7 @@ function initialTier(extraction: Pick<SmartExtraction, "category" | "importance"
   return "peripheral";
 }
 
-function buildIngestedEntry(params: {
+export function buildIngestedEntry(params: {
   source: string;
   scope: string;
   text: string;
@@ -692,6 +692,8 @@ function buildIngestedEntry(params: {
   scope: string;
   importance: number;
   metadata: string;
+  language: string;
+  fts_text: string;
 } {
   const resolution = resolveIngestBoundary({
     source: params.source,
@@ -713,12 +715,21 @@ function buildIngestedEntry(params: {
     sessionId: params.sessionId,
   });
 
+  // Compute language + tokenized FTS text so ingested chunks index the same
+  // way manually-stored (persistMemory) and drained-queue entries do. Without
+  // this, storeBatch falls back to language:"en" + raw (un-tokenized) text,
+  // which breaks CJK lexical/BM25 retrieval for every ingested transcript.
+  const language = detectLang(params.text);
+  const fts_text = tokenizeFts(params.text, language);
+
   return {
     text: params.text,
     vector: params.vector,
     category: resolution.category,
     scope: params.scope,
     importance: params.extraction.importance,
+    language,
+    fts_text,
     metadata: JSON.stringify({
       source: params.source,
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
