@@ -96,6 +96,27 @@ function contextualNoiseMaxLength(text: string): number {
     : CONTEXTUAL_NOISE_MAX_LENGTH_LATIN;
 }
 
+// Beyond the length gate, a denial/meta phrase must DOMINATE the text to count
+// as noise — i.e. the matched phrase is a large fraction of the whole. This
+// keeps short-but-substantive texts that merely contain a denial phrase
+// (e.g. "I don't recall the number, but p99 dropped to 40ms after the fix").
+const NOISE_DOMINATION_RATIO = 0.4;
+
+/**
+ * True when some pattern matches AND its longest match dominates the text
+ * (>= NOISE_DOMINATION_RATIO of the total length). Returns false if nothing
+ * matches, so it doubles as the match check.
+ */
+function patternDominates(text: string, patterns: RegExp[]): boolean {
+  let longestMatch = 0;
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m && m[0].length > longestMatch) longestMatch = m[0].length;
+  }
+  if (longestMatch === 0) return false;
+  return longestMatch / text.length >= NOISE_DOMINATION_RATIO;
+}
+
 export interface NoiseFilterOptions {
   /** Filter agent denial responses (default: true) */
   filterDenials?: boolean;
@@ -126,12 +147,12 @@ export function isNoise(text: string, options: NoiseFilterOptions = {}): boolean
 
   const contextualMax = contextualNoiseMaxLength(trimmed);
   if (opts.filterDenials && trimmed.length <= contextualMax &&
-      DENIAL_PATTERNS.some(p => p.test(trimmed))) {
+      patternDominates(trimmed, DENIAL_PATTERNS)) {
     logInfo(`[INFO] noise-filter: denial pattern matched: "${trimmed.slice(0, 60)}..."`);
     return true;
   }
   if (opts.filterMetaQuestions && trimmed.length <= contextualMax &&
-      META_QUESTION_PATTERNS.some(p => p.test(trimmed))) {
+      patternDominates(trimmed, META_QUESTION_PATTERNS)) {
     logInfo(`[INFO] noise-filter: meta-question filtered: "${trimmed.slice(0, 60)}..."`);
     return true;
   }

@@ -41,4 +41,26 @@ describe("noise-filter denial/meta length gating", () => {
   it("still filters anchored boilerplate regardless of gating", () => {
     expect(isNoise("HEARTBEAT ping from scheduler")).toBe(true);
   });
+
+  // #7 — residual fix: a SHORT (below the length gate) but substantive text that
+  // merely contains a denial/meta phrase must be kept. The denial/meta pattern
+  // must DOMINATE the text to classify it as noise, not just appear in it.
+  it("keeps a short substantive text where the denial phrase does not dominate", () => {
+    // ~83 chars: under the 120-char latin gate, but the 14-char "I don't recall"
+    // is a small fraction — real content follows.
+    expect(
+      isNoise("I don't recall the exact number, but p99 latency dropped to 40ms after the fix."),
+    ).toBe(false);
+  });
+
+  it("keeps a short substantive Chinese text where the denial phrase does not dominate", () => {
+    // Under the 60-char CJK gate, but "我不记得" is a small fraction of real content.
+    expect(isNoise("我不记得具体数字，但修复后 p99 延迟降到了 40ms，已经写进 runbook。")).toBe(false);
+  });
+
+  it("keeps a short substantive text where a meta phrase does not dominate", () => {
+    expect(
+      isNoise("Quick note before I forget: did I mention deploys moved to 10:00 UTC Tuesdays?"),
+    ).toBe(false);
+  });
 });

@@ -16,6 +16,28 @@ import { logInfo, logWarn } from "./stderr-log.js";
 const EMBEDDING_RETRY_DELAYS_MS = [200, 500];
 const EMBEDDING_MAX_CONCURRENCY = 4;
 
+/**
+ * Matches embedding-provider errors that mean "the input is too big for the
+ * model's context" — the only class of failure that chunking-and-retry can fix.
+ *
+ * Deliberately narrow: the previous /context|too long|exceed|length/i was
+ * over-broad. Bare `length` matched array/vector-length bugs, bare `exceed`
+ * matched rate/quota limits, and bare `context` matched gRPC/HTTP
+ * "context deadline exceeded" timeouts — all of which would wrongly trigger the
+ * chunking fallback and mask the real error. Each alternative here implies input
+ * size specifically.
+ */
+const CONTEXT_LENGTH_ERROR_RE =
+  /context[\s_]?length|context window|maximum context|too long|too many tokens|token limit|max(?:imum)? tokens|payload too large|(?:request )?entity too large|\b413\b/i;
+
+/**
+ * True when an error message indicates the embedding input exceeded the model's
+ * context/token limit (and is therefore a candidate for chunk-and-retry).
+ */
+export function isContextLengthError(message: string): boolean {
+  return CONTEXT_LENGTH_ERROR_RE.test(message);
+}
+
 // ============================================================================
 // Embedding Cache (LRU with TTL)
 // ============================================================================
@@ -350,7 +372,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context|too long|exceed|length/i.test(errorMsg);
+      const isContextError = isContextLengthError(errorMsg);
 
       if (isContextError && this._autoChunk && depth === 0) {
         try {
@@ -453,7 +475,7 @@ export class Embedder {
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking each text
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const isContextError = /context|too long|exceed|length/i.test(errorMsg);
+      const isContextError = isContextLengthError(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {
@@ -512,7 +534,7 @@ export class Embedder {
 
           return results;
         } catch (chunkError) {
-          throw new Error(`Failed to embed documents after chunking attempt: ${errorMsg}`);
+          throw new Error(`Failed to embed documents after chunking attempt: ${errorMsg}`, { cause: error });
         }
       }
 
