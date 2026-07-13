@@ -1,100 +1,100 @@
-# RecallNest 召回优化实施清单
+# RecallNest Recall Optimization Implementation Checklist
 
-> 2026-04-01 发现问题：高频信息（如"轮巡仓库"）召回失败
-> 根因：短查询 vs 长文档 embedding 距离过大 + 无频率加权
-> 与已有 P1-P5 互补，本清单聚焦**检索召回**环节
-
----
-
-## P0: 短查询召回增强（优先级最高）
-
-### P0.1 双层索引 — 原文 + 检索锚点
-
-- [ ] `capture-engine.ts` / `ingest.ts`：存储时同时生成一句话摘要（≤80 chars），存入 `metadata.anchor`
-- [ ] `search.ts`：检索时同时搜原文向量和 anchor 向量，取 max score
-- [ ] 效果：短 query "轮巡仓库" 匹配短 anchor "每日轮巡4个win4r仓库"，距离大幅缩短
-- **预估:** ~120 LOC
-- **风险:** 低——不改原文存储，纯增量字段
-- **依赖:** 无
-
-### P0.2 高频 boost — 重复提及自动提权
-
-- [ ] 新增 `frequency-tracker.ts`：记录 query→memory 的命中次数
-- [ ] 评分公式：`final_score = base_score × (1 + log2(hit_count) × boost_factor)`
-- [ ] hit_count ≥ 3 → peripheral 自动升为 core tier
-- [ ] 持久化：写入 `data/frequency-stats.json`，跨 session 累积
-- **预估:** ~100 LOC
-- **风险:** 中——需要平衡 boost 幅度，避免旧高频记忆永远压过新记忆
-- **依赖:** 无
-
-### P0.3 短查询自动扩展
-
-- [ ] `search.ts`：检测 query ≤ 6 字符时，调用 LLM 扩展为 3-5 个同义关键词
-- [ ] 扩展结果缓存到 `data/query-expansion-cache.json`，相同 query 不重复调用
-- [ ] 备选：不用 LLM，维护一个 `data/alias-map.json` 手动/自动映射（"轮巡" → "轮巡 仓库 patrol repo 每日检查"）
-- **预估:** ~60 LOC（alias-map 方案）/ ~100 LOC（LLM 方案）
-- **风险:** alias-map 低；LLM 方案增加延迟 ~200ms
-- **依赖:** 无
+> 2026-04-01 problem found: high-frequency information (such as "轮巡仓库" / patrolling repos) fails to be recalled
+> Root cause: the embedding distance between a short query and a long document is too large + no frequency weighting
+> Complements the existing P1-P5; this checklist focuses on the **retrieval/recall** stage
 
 ---
 
-## 高频 vs 查重 平衡机制（P0.2 的关键设计）
+## P0: Short-query recall enhancement (highest priority)
 
-### 问题
+### P0.1 Two-layer index — original text + retrieval anchor
 
-高频 boost 和去重是一对矛盾：
-- **boost 说**：提到 10 次的东西一定重要，提权！
-- **dedup 说**：同一条信息存了 10 遍，应该合并！
+- [ ] `capture-engine.ts` / `ingest.ts`: at store time, also generate a one-sentence summary (≤80 chars) and save it into `metadata.anchor`
+- [ ] `search.ts`: at retrieval time, search both the original-text vector and the anchor vector, taking the max score
+- [ ] Effect: the short query "轮巡仓库" matches the short anchor "每日轮巡4个win4r仓库" (patrol 4 win4r repos daily), sharply shortening the distance
+- **Estimate:** ~120 LOC
+- **Risk:** Low — does not change original-text storage; a purely additive field
+- **Dependencies:** None
 
-### 设计方案：分层计数，不是分层存储
+### P0.2 High-frequency boost — repeated mentions automatically gain weight
+
+- [ ] Add `frequency-tracker.ts`: record the number of query→memory hits
+- [ ] Scoring formula: `final_score = base_score × (1 + log2(hit_count) × boost_factor)`
+- [ ] hit_count ≥ 3 → peripheral is automatically promoted to the core tier
+- [ ] Persistence: write to `data/frequency-stats.json`, accumulating across sessions
+- **Estimate:** ~100 LOC
+- **Risk:** Medium — the boost magnitude needs balancing so old high-frequency memories don't permanently outrank new ones
+- **Dependencies:** None
+
+### P0.3 Automatic short-query expansion
+
+- [ ] `search.ts`: when a query ≤ 6 characters is detected, call the LLM to expand it into 3-5 synonymous keywords
+- [ ] Cache the expansion results in `data/query-expansion-cache.json` so the same query is not called repeatedly
+- [ ] Alternative: skip the LLM and maintain a `data/alias-map.json` with manual/automatic mappings ("轮巡" → "轮巡 仓库 patrol repo 每日检查")
+- **Estimate:** ~60 LOC (alias-map approach) / ~100 LOC (LLM approach)
+- **Risk:** alias-map is low; the LLM approach adds ~200ms latency
+- **Dependencies:** None
+
+---
+
+## High-frequency vs deduplication balancing mechanism (the key design of P0.2)
+
+### Problem
+
+High-frequency boost and deduplication are in tension:
+- **Boost says**: something mentioned 10 times must be important — boost it!
+- **Dedup says**: the same piece of information was stored 10 times — it should be merged!
+
+### Design: layered counting, not layered storage
 
 ```
-存储层：dedup 照做，相同内容只保留 1 条（现有 consolidation 逻辑不变）
-计数层：新增 frequency-tracker，记录的是 **query 命中次数**，不是存储条数
+Storage layer: dedup as usual; identical content keeps only 1 entry (existing consolidation logic unchanged)
+Counting layer: add frequency-tracker, which records **the number of query hits**, not the number of stored entries
 ```
 
-**关键区分：**
+**Key distinction:**
 
-| 维度 | 存储去重 | 召回加权 |
+| Dimension | Storage dedup | Recall weighting |
 |------|---------|---------|
-| 触发时机 | 写入时（store/ingest） | 检索时（search） |
-| 操作对象 | 重复的 memory 条目 | query→memory 的命中频率 |
-| 目标 | 数据库不膨胀 | 高频信息排前面 |
-| 互相影响 | 不影响——去重后只剩 1 条，但那 1 条的 hit_count 持续累积 |
+| Trigger time | At write time (store/ingest) | At retrieval time (search) |
+| Target | Duplicate memory entries | query→memory hit frequency |
+| Goal | Keep the database from bloating | Rank high-frequency information first |
+| Interaction | None — after dedup only 1 entry remains, but that entry's hit_count keeps accumulating |
 
-### 边界情况处理
+### Edge-case handling
 
-1. **旧高频 vs 新相关**
-   - 时间衰减：`effective_hits = hit_count × decay(days_since_last_hit)`
-   - 30 天没被命中 → hit_count 等效减半，不会永远霸榜
+1. **Old high-frequency vs new relevance**
+   - Time decay: `effective_hits = hit_count × decay(days_since_last_hit)`
+   - Not hit for 30 days → hit_count is effectively halved, so it won't dominate the rankings forever
 
-2. **高频但已过时**
-   - 用户说"轮巡仓库从4个变成3个了" → store_memory 更新
-   - 旧条目被 consolidation 标记为 superseded → hit_count 不继承
-   - 新条目从 0 开始计，但因为用户接下来会频繁触发，很快追上
+2. **High-frequency but outdated**
+   - The user says "轮巡仓库从4个变成3个了" (the patrol went from 4 repos to 3) → store_memory update
+   - The old entry is marked superseded by consolidation → hit_count is not inherited
+   - The new entry starts counting from 0, but since the user will trigger it frequently next, it quickly catches up
 
-3. **频率统计粒度**
-   - 按 memory_id 计数，不按 query 文本
-   - "轮巡" "轮巡仓库" "patrol repo" 命中同一条 memory → 同一个 counter +1
-   - 避免同义词分散计数
+3. **Frequency-counting granularity**
+   - Count by memory_id, not by query text
+   - "轮巡", "轮巡仓库", and "patrol repo" hitting the same memory → the same counter +1
+   - Avoids scattering the count across synonyms
 
 ---
 
-## 与现有 P1-P5 的关系
+## Relationship to the existing P1-P5
 
-| 现有项 | 关系 |
+| Existing item | Relationship |
 |--------|------|
-| P1 摘要保真 | P0.1 的 anchor 生成需要 P1 的保真约束，但可并行开发 |
-| P2 聚类摘要 | 互补——P2 解决注入时省 token，P0 解决检索时找得到 |
-| P3 增量 ingest | P0.1 的 anchor 字段需要对已有数据 backfill，P3 的增量逻辑可复用 |
-| P4 data-checkup | 可加一项检查：anchor 字段覆盖率（多少 memory 已有 anchor） |
-| P5 大文件门控 | 无直接关系 |
+| P1 summary fidelity | P0.1's anchor generation needs P1's fidelity constraints, but can be developed in parallel |
+| P2 cluster summaries | Complementary — P2 saves tokens at injection time, P0 makes things findable at retrieval time |
+| P3 incremental ingest | P0.1's anchor field needs backfilling for existing data; P3's incremental logic can be reused |
+| P4 data-checkup | Could add a check: anchor field coverage (how many memories already have an anchor) |
+| P5 large-file gating | No direct relationship |
 
 ---
 
-## 验证标准
+## Verification criteria
 
-- [ ] `search_memory("轮巡")` → 返回轮巡仓库相关记忆，score ≥ 70%
-- [ ] `search_memory("轮巡仓库")` → 返回结果，score ≥ 80%
-- [ ] 高频记忆（命中 ≥5 次）自动出现在 `resume_context` 的 core 区
-- [ ] 去重后数据库条目数不增长（frequency 只在 tracker 层累积）
+- [ ] `search_memory("轮巡")` → returns memories related to patrolling repos, score ≥ 70%
+- [ ] `search_memory("轮巡仓库")` → returns results, score ≥ 80%
+- [ ] High-frequency memories (hit ≥5 times) automatically appear in the core section of `resume_context`
+- [ ] After dedup, the number of database entries does not grow (frequency accumulates only at the tracker layer)

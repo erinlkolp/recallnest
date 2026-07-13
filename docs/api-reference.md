@@ -1,6 +1,6 @@
 # RecallNest HTTP API Reference
 
-> HTTP API 文档：所有端点的请求/响应格式。服务默认监听 `127.0.0.1:4318`。
+> HTTP API documentation: request/response formats for every endpoint. The service listens on `127.0.0.1:4318` by default.
 
 Base URL: `http://localhost:4318`
 
@@ -39,7 +39,7 @@ POST /v1/recall
 
 Semantic search across scoped memories. Best for quick, conversational lookups when the caller already knows the active scope or session.
 
-> 主动回忆：用关键词搜索相关记忆，返回按相关度排序的结果。默认需要显式 `scope`、`sessionId`，或环境里的默认 scope；只有 `allScopes=true` 才会跨 scope 搜索。
+> Active recall: search for relevant memories by keyword and return results ranked by relevance. By default it requires an explicit `scope`, a `sessionId`, or a default scope from the environment; only `allScopes=true` searches across scopes.
 
 **Request:**
 
@@ -103,7 +103,7 @@ POST /v1/auto-recall
 
 Compose startup continuity context and then run a focused scoped search in one call. Best for agent frameworks that want a single "recall at task start" hook without exposing extra MCP tools.
 
-> 自动回忆：先做 `resume_context` 式的连续性恢复，再在同一 scope 下补一轮 focused search。适合 agent SDK / HTTP 集成在每次任务开始时直接调用。
+> Auto recall: first perform `resume_context`-style continuity recovery, then run one round of focused search within the same scope. Ideal for agent SDK / HTTP integrations to call directly at the start of each task.
 
 **Request:**
 
@@ -185,7 +185,7 @@ POST /v1/store
 
 Store a new durable memory entry.
 
-> 存入长期记忆：适合 profile、preferences、entities、cases、patterns 这类跨窗口仍然有价值的信息。
+> Store long-term memory: suited to information that stays valuable across windows, such as profile, preferences, entities, cases, and patterns.
 
 **Request:**
 
@@ -241,7 +241,7 @@ POST /v1/capture
 
 Store multiple structured memories in one request.
 
-> 批量结构化写入：适合上层 agent 一次性提炼多条 durable memory 后统一写入。
+> Structured batch write: suited to an upper-layer agent that distills several durable memories at once and writes them together.
 
 **Request:**
 
@@ -316,7 +316,7 @@ POST /v1/pattern
 
 Store a reusable workflow as durable `patterns` memory.
 
-> 专门写 workflow pattern：适合把“什么时候用、怎么做、做完得到什么”这种可复用流程沉淀成高质量 `patterns` 记忆。
+> Dedicated workflow-pattern write: ideal for distilling a reusable process — "when to use it, how to do it, what you get when done" — into a high-quality `patterns` memory.
 
 **Request:**
 
@@ -374,7 +374,7 @@ POST /v1/case
 
 Store a reusable problem-solution case as durable `cases` memory.
 
-> 专门写 problem-solution case：适合把“遇到什么问题、怎么解决、最后效果怎样”这种可复用经验沉淀成高质量 `cases` 记忆。
+> Dedicated problem-solution case write: ideal for distilling reusable experience — "what problem came up, how it was solved, and what the outcome was" — into a high-quality `cases` memory.
 
 **Request:**
 
@@ -420,7 +420,7 @@ POST /v1/promote
 
 Promote an evidence memory into durable memory.
 
-> 显式升级：把 transcript / import evidence 中的高价值片段升级成 durable memory，而不是让 raw ingest 直接冒充长期事实。
+> Explicit promotion: upgrade high-value fragments from transcript / import evidence into durable memory, rather than letting raw ingest masquerade as long-term fact.
 
 **Request:**
 
@@ -784,7 +784,7 @@ POST /v1/checkpoint
 
 Store a session checkpoint outside the durable memory index.
 
-> 保存当前工作状态：适合跨窗口延续任务，但不应该混入长期 durable memory。
+> Save current work state: suited to carrying a task across windows, but it should not be mixed into long-term durable memory.
 
 **Request:**
 
@@ -843,7 +843,7 @@ POST /v1/resume
 
 Compose startup context for a fresh window by combining stable durable memory, relevant patterns and cases, plus the latest checkpoint for a session or scope.
 
-> 为新窗口编排上下文：返回的是组合后的连续性上下文，不是原始检索结果堆积。
+> Compose context for a fresh window: it returns assembled continuity context, not a pile of raw retrieval results.
 
 Managed MCP / HTTP resume calls now also append a dedicated `resume_context` workflow observation with source `managed`; this stays in the workflow observation store and does not enter durable recall.
 
@@ -909,7 +909,7 @@ GET /v1/checkpoint/latest
 
 Fetch the latest checkpoint for a given `sessionId` or `scope`.
 
-> 获取最新 checkpoint：适合调试当前工作状态是否已写入，也可以和 `POST /v1/resume` 配合使用。
+> Fetch the latest checkpoint: useful for debugging whether the current work state was written, and it can also be used together with `POST /v1/resume`.
 
 Query params:
 
@@ -950,7 +950,7 @@ POST /v1/workflow-observe
 
 Store one append-only workflow observation outside durable memory.
 
-> 记录 workflow observation：适合追踪 `resume_context`、`checkpoint_session` 等 primitive 是成功、失败、被纠正，还是被漏掉。
+> Record a workflow observation: useful for tracking whether primitives such as `resume_context` and `checkpoint_session` succeeded, failed, were corrected, or were missed.
 
 **Request:**
 
@@ -1011,7 +1011,7 @@ GET /v1/workflow-health?workflowId=resume_context&scope=project:recallnest
 
 Inspect one workflow primitive or return a dashboard of degraded workflows.
 
-> 查看 workflow 健康度：支持单个 workflow 的 7 天 / 30 天汇总，也支持全局 dashboard。
+> View workflow health: supports a 7-day / 30-day summary for a single workflow, as well as a global dashboard.
 
 Query params:
 
@@ -1079,7 +1079,7 @@ GET /v1/workflow-evidence?workflowId=checkpoint_session&scope=project:recallnest
 
 Build an evidence pack for one workflow primitive from recent issue observations.
 
-> 生成 workflow evidence pack：把最近问题 observation、top signals 和修复建议打包出来，方便做规则、prompt、测试收口。
+> Generate a workflow evidence pack: bundle recent issue observations, top signals, and fix suggestions together, making it easier to tighten rules, prompts, and tests.
 
 Query params:
 
@@ -1126,7 +1126,7 @@ POST /v1/search
 
 Advanced search with full metadata, retrieval path details, and scope filtering.
 
-> 高级搜索：返回完整元数据、检索路径、重要度等详情。
+> Advanced search: returns full details including complete metadata, retrieval path, and importance.
 
 **Request:**
 

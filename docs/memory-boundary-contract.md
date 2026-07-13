@@ -1,6 +1,6 @@
 # Memory Boundary Contract
 
-> RecallNest 先解决“谁能写什么、谁说了算”，再继续堆功能。没有边界的记忆系统，只会把更多垃圾写进库里。
+> RecallNest first settles "who can write what, and who has the final say" before piling on more features. A memory system with no boundaries just writes more junk into the store.
 
 ## Why This Exists
 
