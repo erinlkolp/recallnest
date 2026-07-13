@@ -581,7 +581,7 @@ function cosine(a: number[], b: number[]): number {
 
 // ─── Pending extraction queue (for when LLM is unavailable) ─────────────────
 
-const PENDING_EXTRACTION_FILE = resolve(
+export const PENDING_EXTRACTION_FILE = resolve(
   dirname(import.meta.url.replace("file://", "")), "..", "data", "pending-extraction.json"
 );
 
@@ -620,6 +620,10 @@ export async function drainPendingQueue(
   if (pending.length === 0) return { processed: 0, errors: 0 };
 
   let processed = 0, errors = 0;
+  // Items whose store() throws are kept so a later drain can retry them —
+  // clearing the whole queue would drop them permanently, defeating the point
+  // of queueing (to survive until extraction/storage succeeds).
+  const failedItems: typeof pending = [];
   for (let i = 0; i < pending.length; i += 20) {
     const batch = pending.slice(i, i + 20);
     const texts = batch.map(c => c.text);
@@ -649,15 +653,16 @@ export async function drainPendingQueue(
           fts_text,
         });
         processed++;
-      } catch { errors++; }
+      } catch { errors++; failedItems.push(batch[j]); }
     }
   }
 
-  // Clear the queue
+  // Rewrite the queue with only the items that failed to store (empty on full
+  // success), rather than unconditionally clearing it.
   try {
-    writeFileSync(PENDING_EXTRACTION_FILE, "[]");
+    writeFileSync(PENDING_EXTRACTION_FILE, JSON.stringify(failedItems, null, 2));
   } catch (err) {
-    console.error("[recallnest] Failed to clear pending extraction queue:", err instanceof Error ? err.message : String(err));
+    console.error("[recallnest] Failed to rewrite pending extraction queue:", err instanceof Error ? err.message : String(err));
   }
   return { processed, errors };
 }
