@@ -1,7 +1,7 @@
 {
   "name": "recallnest",
   "version": "2.2.1",
-  "description": "RecallNest \u2014 MCP-native, local-first memory search and distillation for AI conversations",
+  "description": "RecallNest — MCP-native, local-first memory search and distillation for AI conversations",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -21,6 +21,7 @@
     "assets": "bun run src/cli.ts assets",
     "clean-briefs": "bun run src/cli.ts clean-briefs --apply",
     "test": "bun test",
+    "typecheck": "tsc --noEmit",
     "test:core": "bun test src/__tests__/scope-policy.test.ts src/__tests__/core-recall-eval.test.ts src/__tests__/capture-engine.test.ts src/__tests__/store-scope-audit.test.ts src/__tests__/scope-inventory.test.ts src/__tests__/workflow-observation.test.ts src/__tests__/resume-context.test.ts src/__tests__/term-registry.test.ts",
     "eval": "bun run src/eval.ts",
     "eval:continuity": "bun run src/eval.ts --mode continuity --cases eval/continuity/cases.json",
@@ -53,5 +54,9 @@
     "type": "git",
     "url": "git+https://github.com/erinlkolp/recallnest.git"
   },
-  "homepage": "https://github.com/erinlkolp/recallnest"
+  "homepage": "https://github.com/erinlkolp/recallnest",
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
 }

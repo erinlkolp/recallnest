@@ -89,7 +89,7 @@ interface DurableWriteInput {
   metadata: string;
   canonicalKey: string;
   promotedFrom?: string;
-  source: "manual" | "agent" | "api";
+  source: "manual" | "agent" | "api" | "session_distill" | "conversation_import";
   sourceCategory?: string;
   sourceBoundary?: ReturnType<typeof extractBoundaryMetadata>;
   language?: string;
@@ -817,6 +817,7 @@ export async function persistMemory(
       resolvedScope: admissionScope,
       storedAt: new Date().toISOString(),
       disposition: "rejected" as const,
+      privacyTier: input.privacyTier,
     };
   }
 
@@ -1068,7 +1069,7 @@ export async function persistMemory(
     input.category !== "preferences" &&
     inferImplicitUsageSlot(input.text)
   ) {
-    const prefCanonicalKey = buildDefaultCanonicalKey("preferences", input.text);
+    const prefCanonicalKey = buildDefaultCanonicalKey({ category: "preferences", text: input.text });
     const prefSlot = inferImplicitUsageSlot(input.text);
     const prefMetadata = buildStructuredMetadata({
       source: input.source,
@@ -1245,6 +1246,7 @@ export async function promoteMemory(
     id: entry.id,
     storedAt: new Date(entry.timestamp).toISOString(),
     disposition,
+    privacyTier: parsePrivacyTier(sourceEntry.metadata),
     sourceMemoryId: sourceEntry.id,
     sourceCategory: sourceEntry.category,
     ...(conflictId ? { conflictId } : {}),

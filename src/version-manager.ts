@@ -43,7 +43,7 @@ export interface VersionGroupMetadata {
  * @returns The version_group ID
  */
 export async function createVersionGroup(
-  store: MemoryStore,
+  store: Pick<MemoryStore, "update">,
   canonical: MemoryEntry,
   member: MemoryEntry,
   scope: string,

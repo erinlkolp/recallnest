@@ -1143,7 +1143,7 @@ export async function ingestCodexSessions(
           }
 
           if (toStore.length > 0) {
-            await store.storeBatch(toStore);
+            await store.storeBatch(toStore as Omit<MemoryEntry, "id" | "timestamp">[]);
             result.chunksIngested += toStore.length;
             fileChunks += toStore.length;
           }
@@ -1346,7 +1346,7 @@ export async function ingestGeminiSessions(
           }
 
           if (toStore.length > 0) {
-            await store.storeBatch(toStore);
+            await store.storeBatch(toStore as Omit<MemoryEntry, "id" | "timestamp">[]);
             result.chunksIngested += toStore.length;
             fileChunks += toStore.length;
           }
@@ -1568,7 +1568,7 @@ export async function ingestCCTranscripts(
           }
 
           if (toStore.length > 0) {
-            await store.storeBatch(toStore);
+            await store.storeBatch(toStore as Omit<MemoryEntry, "id" | "timestamp">[]);
             result.chunksIngested += toStore.length;
             fileChunks += toStore.length;
           }
@@ -1701,7 +1701,7 @@ export async function ingestMarkdownFiles(
           }
 
           if (toStore.length > 0) {
-            await store.storeBatch(toStore);
+            await store.storeBatch(toStore as Omit<MemoryEntry, "id" | "timestamp">[]);
             result.chunksIngested += toStore.length;
             fileChunks += toStore.length;
           }
@@ -1833,7 +1833,7 @@ export async function ingestGenericText(
             }
 
             if (toStore.length > 0) {
-              await store.storeBatch(toStore);
+              await store.storeBatch(toStore as Omit<MemoryEntry, "id" | "timestamp">[]);
               result.chunksIngested += toStore.length;
             }
           }

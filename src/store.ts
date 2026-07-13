@@ -318,7 +318,7 @@ export class MemoryStore {
       };
 
       try {
-        table = await db.createTable(TABLE_NAME, [schemaEntry]);
+        table = await db.createTable(TABLE_NAME, [schemaEntry] as unknown as Record<string, unknown>[]);
         await table.delete('id = "__schema__"');
       } catch (createErr) {
         // Race: another caller (or eventual consistency) created the table
@@ -412,7 +412,7 @@ export class MemoryStore {
     }
 
     try {
-      await this.table!.add([fullEntry]);
+      await this.table!.add([fullEntry] as unknown as Record<string, unknown>[]);
     } catch (err: any) {
       const code = err.code || "";
       const message = err.message || String(err);
@@ -451,7 +451,7 @@ export class MemoryStore {
     });
 
     try {
-      await this.table!.add(enrichedEntries);
+      await this.table!.add(enrichedEntries as unknown as Record<string, unknown>[]);
     } catch (err: any) {
       const code = err.code || "";
       const message = err.message || String(err);
@@ -503,7 +503,7 @@ export class MemoryStore {
       }
     } catch { /* malformed metadata — skip backfill */ }
 
-    await this.table!.add([full]);
+    await this.table!.add([full] as unknown as Record<string, unknown>[]);
     return full;
   }
 
@@ -1005,7 +1005,7 @@ export class MemoryStore {
       .mergeInsert("id")
       .whenMatchedUpdateAll()
       .whenNotMatchedInsertAll()
-      .execute([updated]);
+      .execute([updated] as unknown as Record<string, unknown>[]);
 
     return updated;
   }

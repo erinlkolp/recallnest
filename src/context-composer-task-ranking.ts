@@ -134,7 +134,9 @@ export function scoreTaskCandidate(category: TaskCategory, result: RetrievalResu
   let score = result.score;
   if (isDurableMemoryScope(result.entry.scope)) score += 5;
   if (boundary?.layer === "durable") score += 4;
-  if (boundary?.layer === "working") score += 1;
+  // NOTE: a prior `boundary?.layer === "working"` bonus was dead code — "working"
+  // is a decay tier, never a boundary layer (canonical|durable|session|evidence),
+  // so it never fired. Removed to preserve behavior; the intended layer is unclear.
   if (boundary?.layer === "evidence") score -= 4;
   if (extractCanonicalKey(result.entry.metadata)) score += 2;
   if (result.entry.category === category) score += 2;
