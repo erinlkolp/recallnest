@@ -1,10 +1,10 @@
 /**
- * 清洗步骤 1：删除精确重复记忆
- * 每组重复保留 accessCount 最高的那条，其余删除
+ * Cleanup step 1: delete exact-duplicate memories
+ * For each duplicate group, keep the one with the highest accessCount and delete the rest
  *
- * 用法：
+ * Usage:
  *   bun run scripts/cleanup-step1-exact-dups.ts [--execute]
- *   不加 --execute 只统计，加了才真删
+ *   Without --execute it only reports stats; with it, it actually deletes
  */
 
 import lancedb from "@lancedb/lancedb";
@@ -24,20 +24,20 @@ interface MemoryRow {
 }
 
 async function main() {
-  console.log(`\n🧹 清洗步骤 1：精确重复删除 ${EXECUTE ? "[执行模式]" : "[预览模式]"}`);
+  console.log(`\n🧹 Cleanup step 1: exact-duplicate deletion ${EXECUTE ? "[execute mode]" : "[preview mode]"}`);
   console.log("=".repeat(60));
 
   const db = await lancedb.connect(DB_PATH);
   const table = await db.openTable(TABLE_NAME);
 
-  console.log("⏳ 读取全量数据...");
+  console.log("⏳ Loading all data...");
   const allRows: MemoryRow[] = await table
     .query()
     .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"])
     .toArray() as any;
 
   const total = allRows.length;
-  console.log(`✅ ${total.toLocaleString()} 条记忆\n`);
+  console.log(`✅ ${total.toLocaleString()} memories\n`);
 
   // Parse metadata
   const parsedRows = allRows.map(row => ({
@@ -71,26 +71,26 @@ async function main() {
     }
   }
 
-  console.log(`📊 统计结果:`);
-  console.log(`  重复组数:     ${dupGroups.length.toLocaleString()}`);
-  console.log(`  待删除条数:   ${idsToDelete.length.toLocaleString()}`);
-  console.log(`  保留条数:     ${(total - idsToDelete.length).toLocaleString()}`);
-  console.log(`  瘦身比例:     ${(idsToDelete.length / total * 100).toFixed(1)}%`);
+  console.log(`📊 Statistics:`);
+  console.log(`  Duplicate groups:   ${dupGroups.length.toLocaleString()}`);
+  console.log(`  To delete:          ${idsToDelete.length.toLocaleString()}`);
+  console.log(`  To keep:            ${(total - idsToDelete.length).toLocaleString()}`);
+  console.log(`  Reduction:          ${(idsToDelete.length / total * 100).toFixed(1)}%`);
 
   // Show top 10 largest duplicate groups
   const topGroups = dupGroups.sort((a, b) => b[1].length - a[1].length).slice(0, 10);
-  console.log(`\n  Top 10 重复组:`);
+  console.log(`\n  Top 10 duplicate groups:`);
   for (const [text, rows] of topGroups) {
     console.log(`    [×${rows.length}] ${text.slice(0, 70)}...`);
   }
 
   if (!EXECUTE) {
-    console.log(`\n⚠️  预览模式，未执行删除。加 --execute 参数执行。`);
+    console.log(`\n⚠️  Preview mode; no deletions performed. Pass --execute to run.`);
     return;
   }
 
   // Execute deletion in batches
-  console.log(`\n🔥 开始删除 ${idsToDelete.length.toLocaleString()} 条...`);
+  console.log(`\n🔥 Deleting ${idsToDelete.length.toLocaleString()} entries...`);
   const batchSize = 100;
   let deleted = 0;
 
@@ -108,10 +108,10 @@ async function main() {
 
   // Verify
   const remaining = await table.countRows();
-  console.log(`\n✅ 删除完成！`);
-  console.log(`  删除前: ${total.toLocaleString()} 条`);
-  console.log(`  删除后: ${remaining.toLocaleString()} 条`);
-  console.log(`  实际删除: ${(total - remaining).toLocaleString()} 条`);
+  console.log(`\n✅ Deletion complete!`);
+  console.log(`  Before: ${total.toLocaleString()} entries`);
+  console.log(`  After:  ${remaining.toLocaleString()} entries`);
+  console.log(`  Actually deleted: ${(total - remaining).toLocaleString()} entries`);
 }
 
 main().catch(console.error);

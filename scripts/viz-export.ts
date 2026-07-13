@@ -1,9 +1,9 @@
 /**
- * 可视化数据导出 + HTML 仪表盘生成
- * 模块 6：把体检数据做成交互式可视化
+ * Visualization data export + HTML dashboard generation
+ * Module 6: turn health-check data into an interactive visualization
  *
- * 用法：bun run scripts/viz-export.ts [lancedb-dir]
- * 输出：scripts/viz-dashboard.html（本地打开即可）
+ * Usage: bun run scripts/viz-export.ts [lancedb-dir]
+ * Output: scripts/viz-dashboard.html (just open it locally)
  */
 
 import lancedb from "@lancedb/lancedb";
@@ -36,7 +36,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 async function main() {
-  console.log("⏳ 读取数据...");
+  console.log("⏳ Loading data...");
   const db = await lancedb.connect(DB_PATH);
   const table = await db.openTable(TABLE_NAME);
 
@@ -46,7 +46,7 @@ async function main() {
     .toArray() as any;
 
   const total = allRows.length;
-  console.log(`✅ ${total.toLocaleString()} 条记忆`);
+  console.log(`✅ ${total.toLocaleString()} memories`);
 
   const parsedRows = allRows.map(row => ({
     ...row,
@@ -114,11 +114,11 @@ async function main() {
 
   // 8. Access count distribution
   const accessBuckets: Record<string, number> = {
-    "0 (死记忆)": 0, "1-2": 0, "3-5": 0, "6-10": 0, "11-50": 0, "50+": 0,
+    "0 (dead)": 0, "1-2": 0, "3-5": 0, "6-10": 0, "11-50": 0, "50+": 0,
   };
   for (const r of parsedRows) {
     const ac = r.meta.accessCount ?? r.meta.access_count ?? 0;
-    if (ac === 0) accessBuckets["0 (死记忆)"]++;
+    if (ac === 0) accessBuckets["0 (dead)"]++;
     else if (ac <= 2) accessBuckets["1-2"]++;
     else if (ac <= 5) accessBuckets["3-5"]++;
     else if (ac <= 10) accessBuckets["6-10"]++;
@@ -146,7 +146,7 @@ async function main() {
   }
 
   // 11. Embedding 2D projection (PCA on sample)
-  console.log("⏳ 读取向量样本做 PCA 投影...");
+  console.log("⏳ Loading vector sample for PCA projection...");
   const pca_sample_size = 3000;
   const sampleRows: MemoryRow[] = await table
     .query()
@@ -242,8 +242,8 @@ async function main() {
     total,
     categories: catMap.size,
     scopes: scopeMap.size,
-    deadMemories: accessBuckets["0 (死记忆)"],
-    deadPct: (accessBuckets["0 (死记忆)"] / total * 100).toFixed(1),
+    deadMemories: accessBuckets["0 (dead)"],
+    deadPct: (accessBuckets["0 (dead)"] / total * 100).toFixed(1),
     oldest: new Date(Math.min(...parsedRows.map(r => r.timestamp))).toISOString().slice(0, 10),
     newest: new Date(Math.max(...parsedRows.map(r => r.timestamp))).toISOString().slice(0, 10),
     avgImportance: (parsedRows.reduce((s, r) => s + r.importance, 0) / total).toFixed(3),
@@ -270,17 +270,17 @@ async function main() {
 
   const html = generateHTML(vizData);
   writeFileSync(OUTPUT_HTML, html, "utf-8");
-  console.log(`\n✅ 仪表盘已生成: ${OUTPUT_HTML}`);
-  console.log("   用浏览器打开即可查看交互图表");
+  console.log(`\n✅ Dashboard generated: ${OUTPUT_HTML}`);
+  console.log("   Open it in a browser to view the interactive charts");
 }
 
 function generateHTML(data: any): string {
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RecallNest 记忆体检仪表盘</title>
+<title>RecallNest Memory Health Dashboard</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -369,33 +369,33 @@ function generateHTML(data: any): string {
 </head>
 <body>
 
-<h1>🧠 RecallNest 记忆体检仪表盘</h1>
-<p class="subtitle">生成时间: ${new Date().toISOString().slice(0, 19)} · 数据来源: LanceDB memories table</p>
+<h1>🧠 RecallNest Memory Health Dashboard</h1>
+<p class="subtitle">Generated: ${new Date().toISOString().slice(0, 19)} · Source: LanceDB memories table</p>
 
 <div class="stats-bar">
   <div class="stat-card">
     <div class="value">${data.summaryStats.total.toLocaleString()}</div>
-    <div class="label">总记忆数</div>
+    <div class="label">Total memories</div>
   </div>
   <div class="stat-card alert">
     <div class="value">${data.summaryStats.deadPct}%</div>
-    <div class="label">死记忆率</div>
+    <div class="label">Dead-memory rate</div>
   </div>
   <div class="stat-card">
     <div class="value">${data.summaryStats.categories}</div>
-    <div class="label">类别数</div>
+    <div class="label">Categories</div>
   </div>
   <div class="stat-card">
     <div class="value">${data.summaryStats.scopes}</div>
-    <div class="label">Scope 数</div>
+    <div class="label">Scopes</div>
   </div>
   <div class="stat-card">
     <div class="value">${data.summaryStats.avgImportance}</div>
-    <div class="label">平均 Importance</div>
+    <div class="label">Avg importance</div>
   </div>
   <div class="stat-card">
     <div class="value">${data.summaryStats.oldest}</div>
-    <div class="label">最早记忆</div>
+    <div class="label">Oldest memory</div>
   </div>
 </div>
 
@@ -403,49 +403,49 @@ function generateHTML(data: any): string {
 
   <!-- 1. Category Distribution -->
   <div class="chart-box">
-    <h3>📊 类别分布</h3>
+    <h3>📊 Category distribution</h3>
     <div class="chart-container" id="chart-category"></div>
   </div>
 
   <!-- 2. Tier Distribution -->
   <div class="chart-box">
-    <h3>📊 Tier 分布</h3>
+    <h3>📊 Tier distribution</h3>
     <div class="chart-container" id="chart-tier"></div>
   </div>
 
   <!-- 3. Monthly Timeline -->
   <div class="chart-box full-width">
-    <h3>📈 月度记忆增长</h3>
+    <h3>📈 Monthly memory growth</h3>
     <div class="chart-container" id="chart-timeline"></div>
   </div>
 
   <!-- 4. Daily Timeline (last 90 days) -->
   <div class="chart-box full-width">
-    <h3>📈 近 90 天每日记忆量</h3>
+    <h3>📈 Daily memory volume (last 90 days)</h3>
     <div class="chart-container" id="chart-daily"></div>
   </div>
 
   <!-- 5. Hourly Pattern -->
   <div class="chart-box">
-    <h3>⏰ 小时分布</h3>
+    <h3>⏰ Hourly distribution</h3>
     <div class="chart-container" id="chart-hourly"></div>
   </div>
 
   <!-- 6. Day of Week -->
   <div class="chart-box">
-    <h3>📅 星期分布</h3>
+    <h3>📅 Day-of-week distribution</h3>
     <div class="chart-container" id="chart-dow"></div>
   </div>
 
   <!-- 7. Access Count -->
   <div class="chart-box">
-    <h3>🔍 访问次数分布</h3>
+    <h3>🔍 Access-count distribution</h3>
     <div class="chart-container" id="chart-access"></div>
   </div>
 
   <!-- 8. Importance Distribution -->
   <div class="chart-box">
-    <h3>⚖️ Importance 分布</h3>
+    <h3>⚖️ Importance distribution</h3>
     <div class="chart-container" id="chart-importance"></div>
   </div>
 
@@ -457,19 +457,19 @@ function generateHTML(data: any): string {
 
   <!-- 10. Scope × Category Heatmap -->
   <div class="chart-box full-width">
-    <h3>🗺️ Scope × Category 热力图</h3>
+    <h3>🗺️ Scope × Category heatmap</h3>
     <div class="chart-container" id="chart-heatmap"></div>
   </div>
 
   <!-- 11. Text Length Distribution -->
   <div class="chart-box">
-    <h3>📏 文本长度分布</h3>
+    <h3>📏 Text length distribution</h3>
     <div class="chart-container" id="chart-textlen"></div>
   </div>
 
   <!-- 12. Embedding PCA Scatter -->
   <div class="chart-box full-width">
-    <h3>🧬 Embedding PCA 散点图 (采样 ${data.pcaPoints.length} 条)</h3>
+    <h3>🧬 Embedding PCA scatter (${data.pcaPoints.length}-entry sample)</h3>
     <div class="chart-container tall" id="chart-pca"></div>
   </div>
 
@@ -523,8 +523,8 @@ Plotly.newPlot('chart-tier', [{
   Plotly.newPlot('chart-timeline', traces, {
     ...DARK_LAYOUT,
     barmode: 'stack',
-    xaxis: { title: '月份' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Month' },
+    yaxis: { title: 'Memories' },
     legend: { orientation: 'h', y: -0.2 },
   });
 }
@@ -539,8 +539,8 @@ Plotly.newPlot('chart-tier', [{
     marker: { color: '#00d4ff', opacity: 0.7 },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '日期' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Date' },
+    yaxis: { title: 'Memories' },
   });
 }
 
@@ -556,13 +556,13 @@ Plotly.newPlot('chart-hourly', [{
   },
 }], {
   ...DARK_LAYOUT,
-  xaxis: { title: '小时' },
-  yaxis: { title: '记忆数' },
+  xaxis: { title: 'Hour' },
+  yaxis: { title: 'Memories' },
 });
 
 // 6. Day of Week
 {
-  const dowNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   Plotly.newPlot('chart-dow', [{
     x: dowNames,
     y: DATA.dowData,
@@ -570,8 +570,8 @@ Plotly.newPlot('chart-hourly', [{
     marker: { color: COLORS.slice(0, 7) },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '星期' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Day of week' },
+    yaxis: { title: 'Memories' },
   });
 }
 
@@ -582,13 +582,13 @@ Plotly.newPlot('chart-access', [{
   type: 'bar',
   marker: {
     color: Object.keys(DATA.accessBuckets).map((k, i) =>
-      k.includes('死记忆') ? '#ff6b6b' : COLORS[i]
+      k.includes('dead') ? '#ff6b6b' : COLORS[i]
     ),
   },
 }], {
   ...DARK_LAYOUT,
-  xaxis: { title: '访问次数' },
-  yaxis: { title: '记忆数', type: 'log' },
+  xaxis: { title: 'Access count' },
+  yaxis: { title: 'Memories', type: 'log' },
 });
 
 // 8. Importance Histogram
@@ -605,7 +605,7 @@ Plotly.newPlot('chart-importance', [{
 }], {
   ...DARK_LAYOUT,
   xaxis: { title: 'Importance' },
-  yaxis: { title: '记忆数' },
+  yaxis: { title: 'Memories' },
 });
 
 // 9. Top Scopes
@@ -618,7 +618,7 @@ Plotly.newPlot('chart-scopes', [{
 }], {
   ...DARK_LAYOUT,
   margin: { ...DARK_LAYOUT.margin, l: 250 },
-  xaxis: { title: '记忆数' },
+  xaxis: { title: 'Memories' },
 });
 
 // 10. Heatmap
@@ -644,8 +644,8 @@ Plotly.newPlot('chart-heatmap', [{
     marker: { color: '#1abc9c' },
   }], {
     ...DARK_LAYOUT,
-    xaxis: { title: '字符数' },
-    yaxis: { title: '记忆数' },
+    xaxis: { title: 'Characters' },
+    yaxis: { title: 'Memories' },
   });
 }
 

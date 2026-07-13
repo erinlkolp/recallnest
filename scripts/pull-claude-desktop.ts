@@ -2,10 +2,10 @@
 /**
  * pull-claude-desktop.ts
  *
- * 从 claude.ai 拉取 Claude Desktop / 网页版对话历史，
- * 转成 CC transcript .jsonl 格式，供 `lm ingest --source desktop` 消费。
+ * Pulls Claude Desktop / web conversation history from claude.ai and
+ * converts it into CC transcript .jsonl format for `lm ingest --source desktop` to consume.
  *
- * 用法：
+ * Usage:
  *   CLAUDE_SESSION_KEY="sk-ant-..." bun scripts/pull-claude-desktop.ts
  *   CLAUDE_SESSION_KEY="sk-ant-..." bun scripts/pull-claude-desktop.ts --limit 10
  *   CLAUDE_SESSION_KEY="sk-ant-..." bun scripts/pull-claude-desktop.ts --since 2025-01-01
@@ -106,13 +106,13 @@ class ClaudeApiClient {
 
         if (res.status === 401 || res.status === 403) {
           throw new Error(
-            `认证失败 (${res.status})。sessionKey 可能已过期，请从浏览器重新获取。`,
+            `Authentication failed (${res.status}). The sessionKey may have expired; please fetch a new one from your browser.`,
           );
         }
 
         if (res.status === 429) {
           this.throttleMs = Math.min(this.throttleMs * 2, 5000);
-          console.log(`  ⚠️  限流，等待 ${this.throttleMs}ms...`);
+          console.log(`  ⚠️  Rate limited; waiting ${this.throttleMs}ms...`);
           await sleep(this.throttleMs);
           continue;
         }
@@ -120,7 +120,7 @@ class ClaudeApiClient {
         if (res.status >= 500) {
           const waitMs = Math.pow(2, attempt) * 1000;
           console.log(
-            `  ⚠️  服务器错误 ${res.status}，${waitMs}ms 后重试...`,
+            `  ⚠️  Server error ${res.status}; retrying in ${waitMs}ms...`,
           );
           await sleep(waitMs);
           continue;
@@ -135,26 +135,26 @@ class ClaudeApiClient {
         return await res.json();
       } catch (err: any) {
         if (
-          err.message?.includes("认证失败") ||
+          err.message?.includes("Authentication failed") ||
           err.message?.startsWith("HTTP ")
         ) {
           throw err;
         }
         lastError = err;
         const waitMs = Math.pow(2, attempt) * 1000;
-        console.log(`  ⚠️  网络错误: ${err.message}，${waitMs}ms 后重试...`);
+        console.log(`  ⚠️  Network error: ${err.message}; retrying in ${waitMs}ms...`);
         await sleep(waitMs);
       }
     }
 
-    throw lastError || new Error("请求失败，已重试 3 次");
+    throw lastError || new Error("Request failed after 3 retries");
   }
 
   async getOrgId(): Promise<string> {
     if (this.orgId) return this.orgId;
     const orgs = await this.request("/api/organizations");
     if (!Array.isArray(orgs) || orgs.length === 0) {
-      throw new Error("获取 organization 失败。请确认 sessionKey 有效。");
+      throw new Error("Failed to fetch organization. Please confirm the sessionKey is valid.");
     }
     this.orgId = orgs[0].uuid;
     return this.orgId!;
@@ -343,9 +343,9 @@ async function main() {
 
   if (!sessionKey) {
     console.error(
-      "❌ 需要 sessionKey。用法：\n" +
+      "❌ A sessionKey is required. Usage:\n" +
         "   CLAUDE_SESSION_KEY='...' bun scripts/pull-claude-desktop.ts\n\n" +
-        "获取方式：浏览器登录 claude.ai → DevTools → Application → Cookies → sessionKey",
+        "How to get it: log in to claude.ai in your browser → DevTools → Application → Cookies → sessionKey",
     );
     process.exit(1);
   }
@@ -361,17 +361,17 @@ async function main() {
   const state = loadSyncState();
 
   // Step 1: Verify auth
-  console.log("🔑 验证 sessionKey...");
+  console.log("🔑 Verifying sessionKey...");
   try {
     const orgId = await client.getOrgId();
-    console.log(`  ✅ 认证成功 (org: ${orgId.slice(0, 8)}...)`);
+    console.log(`  ✅ Authenticated (org: ${orgId.slice(0, 8)}...)`);
   } catch (err: any) {
     console.error(`  ❌ ${err.message}`);
     process.exit(1);
   }
 
   // Step 2: List all conversations (paginated)
-  console.log("\n📋 获取对话列表...");
+  console.log("\n📋 Fetching conversation list...");
   const allConversations: ConversationSummary[] = [];
   let offset = 0;
   let pageCount = 0;
@@ -385,7 +385,7 @@ async function main() {
       if (sinceDate && new Date(conv.updated_at) < sinceDate) {
         // API returns newest first; once we hit older, stop
         console.log(
-          `  ⏭️  跳过 ${conv.updated_at} 之前的对话 (--since ${values.since})`,
+          `  ⏭️  Skipping conversations before ${conv.updated_at} (--since ${values.since})`,
         );
         break;
       }
@@ -394,7 +394,7 @@ async function main() {
 
     pageCount++;
     process.stdout.write(
-      `  已扫描 ${allConversations.length} 条对话 (第 ${pageCount} 页)...\r`,
+      `  Scanned ${allConversations.length} conversations (page ${pageCount})...\r`,
     );
 
     // Stop if we hit the since boundary or got a short page
@@ -408,24 +408,24 @@ async function main() {
     await client.throttle();
   }
 
-  console.log(`  ✅ 共发现 ${allConversations.length} 条对话`);
+  console.log(`  ✅ Found ${allConversations.length} conversations total`);
 
   // Step 3: Filter — skip already-synced
   const toPull = allConversations.filter((c) => needsPull(state, c));
   const toSkip = allConversations.length - toPull.length;
 
   if (toSkip > 0) {
-    console.log(`  ⏭️  ${toSkip} 条已同步，跳过`);
+    console.log(`  ⏭️  ${toSkip} already synced; skipping`);
   }
 
   // Apply --limit
   const batch = toPull.slice(0, limit);
   if (batch.length === 0) {
-    console.log("\n✅ 没有需要拉取的新对话。");
+    console.log("\n✅ No new conversations to pull.");
     return;
   }
 
-  console.log(`\n🔄 开始拉取 ${batch.length} 条对话...\n`);
+  console.log(`\n🔄 Pulling ${batch.length} conversations...\n`);
 
   // Step 4: Pull each conversation
   let pulled = 0;
@@ -446,12 +446,12 @@ async function main() {
       const lines = convertToCCTranscript(full);
 
       if (lines.length === 0) {
-        console.log(` ⏭️  空对话`);
+        console.log(` ⏭️  Empty conversation`);
         skipped++;
       } else {
         const outPath = join(OUTPUT_DIR, `${conv.uuid}.jsonl`);
         writeFileSync(outPath, lines.join("\n") + "\n");
-        console.log(` ✅ ${lines.length} 条消息`);
+        console.log(` ✅ ${lines.length} messages`);
         pulled++;
       }
 
@@ -485,16 +485,16 @@ async function main() {
   saveSyncState(state);
 
   // Step 5: Summary
-  console.log("\n📊 拉取汇总:");
-  console.log(`  总对话数: ${allConversations.length}`);
-  console.log(`  已同步跳过: ${toSkip}`);
-  console.log(`  本次拉取: ${pulled}`);
-  console.log(`  空对话跳过: ${skipped}`);
-  console.log(`  失败: ${failed}`);
-  console.log(`  输出目录: ${OUTPUT_DIR}`);
+  console.log("\n📊 Pull summary:");
+  console.log(`  Total conversations: ${allConversations.length}`);
+  console.log(`  Skipped (already synced): ${toSkip}`);
+  console.log(`  Pulled this run: ${pulled}`);
+  console.log(`  Skipped (empty): ${skipped}`);
+  console.log(`  Failed: ${failed}`);
+  console.log(`  Output directory: ${OUTPUT_DIR}`);
 
   if (errors.length > 0) {
-    console.log("\n⚠️  失败详情:");
+    console.log("\n⚠️  Failure details:");
     for (const e of errors.slice(0, 10)) {
       console.log(`  - ${e}`);
     }
@@ -502,14 +502,14 @@ async function main() {
 
   if (pulled > 0) {
     console.log(
-      "\n🎯 下一步：运行以下命令将对话导入 RecallNest：",
+      "\n🎯 Next step: run the following command to import the conversations into RecallNest:",
     );
     console.log("   bun run src/cli.ts ingest --source desktop");
   }
 }
 
 main().catch((err) => {
-  console.error(`\n❌ 致命错误: ${err.message}`);
+  console.error(`\n❌ Fatal error: ${err.message}`);
   if (err.stack) console.error(err.stack);
   process.exit(1);
 });

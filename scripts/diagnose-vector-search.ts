@@ -1,12 +1,13 @@
 /**
- * 诊断脚本：验证跨进程 vectorSearch 的 _distance 值
+ * Diagnostic script: verify cross-process vectorSearch _distance values
  *
- * 用法: bun run scripts/diagnose-vector-search.ts
+ * Usage: bun run scripts/diagnose-vector-search.ts
  *
- * 做三件事:
- * 1. list() 确认数据存在
- * 2. 取第一条记录的 vector，用它自己做 vectorSearch（理论上 distance=0, score=1.0）
- * 3. 打印 raw _distance 值，看是不是 NaN 或异常大
+ * Does three things:
+ * 1. list() to confirm data exists
+ * 2. Take the first record's vector and run vectorSearch with it against itself
+ *    (in theory distance=0, score=1.0)
+ * 3. Print the raw _distance value to check whether it is NaN or abnormally large
  */
 
 import lancedb from "@lancedb/lancedb";

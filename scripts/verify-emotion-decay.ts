@@ -25,11 +25,13 @@ console.log("\n" + DIVIDER);
 console.log("1️⃣  detectEmotion: salience + source");
 console.log(DIVIDER);
 
+// NOTE: the `text` fields are functional inputs fed to detectEmotion(), which
+// matches Chinese emotion keywords — keep them verbatim. Only labels are display.
 const samples = [
-  { label: "愤怒调试", text: "CRITICAL BUG! 这个问题搞了三天还是崩溃，太frustrating了！" },
-  { label: "成功修复", text: "Finally fixed it! Everything works perfectly, all tests pass!" },
-  { label: "中性日志", text: "Updated the config file and ran the migration script." },
-  { label: "中文负面", text: "这个方案不好用，不开心，又失败了" },
+  { label: "Angry debugging", text: "CRITICAL BUG! 这个问题搞了三天还是崩溃，太frustrating了！" },
+  { label: "Successful fix", text: "Finally fixed it! Everything works perfectly, all tests pass!" },
+  { label: "Neutral log", text: "Updated the config file and ran the migration script." },
+  { label: "Chinese negative", text: "这个方案不好用，不开心，又失败了" },
 ];
 
 for (const s of samples) {
@@ -103,9 +105,9 @@ const makeEvo = (ageDays: number, accessCount: number): EvolutionMetadata => ({
 });
 
 const scenarios = [
-  { label: "新记忆(7d), 3次访问, importance=0.7", age: 7, access: 3, importance: 0.7 },
-  { label: "旧记忆(60d), 3次访问, importance=0.7", age: 60, access: 3, importance: 0.7 },
-  { label: "很旧(120d), 低访问, importance=0.5", age: 120, access: 1, importance: 0.5 },
+  { label: "New memory (7d), 3 accesses, importance=0.7", age: 7, access: 3, importance: 0.7 },
+  { label: "Old memory (60d), 3 accesses, importance=0.7", age: 60, access: 3, importance: 0.7 },
+  { label: "Very old (120d), low access, importance=0.5", age: 120, access: 1, importance: 0.5 },
 ];
 
 for (const sc of scenarios) {

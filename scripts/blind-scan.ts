@@ -1,9 +1,9 @@
 /**
- * 盲扫脚本 — 模块 4：开放式探索
- * 不带预设地分析 38K 条记忆的文本内容
- * 只读，不写入任何内容
+ * Blind scan script — Module 4: open-ended exploration
+ * Analyzes the text content of ~38K memories without preconceptions
+ * Read-only; writes nothing
  *
- * 用法：bun run scripts/blind-scan.ts [lancedb-dir]
+ * Usage: bun run scripts/blind-scan.ts [lancedb-dir]
  */
 
 import lancedb from "@lancedb/lancedb";
@@ -75,22 +75,22 @@ const STOPWORDS = new Set([
 ]);
 
 async function main() {
-  console.log("\n🔍 盲扫报告 — RecallNest 开放式探索");
+  console.log("\n🔍 Blind Scan Report — RecallNest open-ended exploration");
   console.log("=".repeat(70));
-  console.log(`📅 时间: ${new Date().toISOString().slice(0, 19)}`);
-  console.log(`📂 路径: ${DB_PATH}\n`);
+  console.log(`📅 Time: ${new Date().toISOString().slice(0, 19)}`);
+  console.log(`📂 Path: ${DB_PATH}\n`);
 
   const db = await lancedb.connect(DB_PATH);
   const table = await db.openTable(TABLE_NAME);
 
-  console.log("⏳ 读取全量数据...");
+  console.log("⏳ Loading all data...");
   const allRows: MemoryRow[] = await table
     .query()
     .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"])
     .toArray() as any;
 
   const total = allRows.length;
-  console.log(`✅ ${total.toLocaleString()} 条记忆\n`);
+  console.log(`✅ ${total.toLocaleString()} memories\n`);
 
   const parsedRows = allRows.map(row => ({
     ...row,
@@ -98,9 +98,9 @@ async function main() {
   }));
 
   // ============================================
-  // 1. 文本长度分布
+  // 1. Text length distribution
   // ============================================
-  console.log("📊 1. 文本长度分布");
+  console.log("📊 1. Text length distribution");
   console.log("-".repeat(70));
   const lengths = parsedRows.map(r => r.text.length);
   lengths.sort((a, b) => a - b);
@@ -109,12 +109,12 @@ async function main() {
   const p95Len = lengths[Math.floor(total * 0.95)];
   const p99Len = lengths[Math.floor(total * 0.99)];
 
-  console.log(`  最短: ${lengths[0]} 字符`);
-  console.log(`  中位: ${medianLen} 字符`);
-  console.log(`  平均: ${Math.round(avgLen)} 字符`);
-  console.log(`  P95:  ${p95Len} 字符`);
-  console.log(`  P99:  ${p99Len} 字符`);
-  console.log(`  最长: ${lengths[total - 1]} 字符`);
+  console.log(`  Min:    ${lengths[0]} chars`);
+  console.log(`  Median: ${medianLen} chars`);
+  console.log(`  Mean:   ${Math.round(avgLen)} chars`);
+  console.log(`  P95:    ${p95Len} chars`);
+  console.log(`  P99:    ${p99Len} chars`);
+  console.log(`  Max:    ${lengths[total - 1]} chars`);
 
   // Length buckets
   const lenBuckets = new Map<string, number>();
@@ -136,7 +136,7 @@ async function main() {
       }
     }
   }
-  console.log("\n  分布:");
+  console.log("\n  Distribution:");
   for (const [, , label] of lenRanges) {
     const count = lenBuckets.get(label) || 0;
     const pct = (count / total * 100).toFixed(1);
@@ -147,17 +147,17 @@ async function main() {
   // Extremely short texts (likely garbage)
   const ultraShort = parsedRows.filter(r => r.text.length < 20);
   if (ultraShort.length > 0) {
-    console.log(`\n  ⚠️ 超短文本 (<20 字符): ${ultraShort.length} 条`);
-    console.log("  示例:");
+    console.log(`\n  ⚠️ Ultra-short text (<20 chars): ${ultraShort.length} entries`);
+    console.log("  Examples:");
     for (const r of ultraShort.slice(0, 5)) {
       console.log(`    [${r.category}] "${r.text}"`);
     }
   }
 
   // ============================================
-  // 2. 语言混合分析
+  // 2. Language mix analysis
   // ============================================
-  console.log("\n📊 2. 语言混合分析");
+  console.log("\n📊 2. Language mix analysis");
   console.log("-".repeat(70));
   let pureEn = 0, pureCn = 0, mixed = 0, other = 0;
   for (const row of parsedRows) {
@@ -168,15 +168,15 @@ async function main() {
     else if (hasEn) pureEn++;
     else other++;
   }
-  console.log(`  纯英文:     ${pureEn.toLocaleString()} (${(pureEn/total*100).toFixed(1)}%)`);
-  console.log(`  纯中文:     ${pureCn.toLocaleString()} (${(pureCn/total*100).toFixed(1)}%)`);
-  console.log(`  中英混合:   ${mixed.toLocaleString()} (${(mixed/total*100).toFixed(1)}%)`);
-  console.log(`  其他:       ${other.toLocaleString()} (${(other/total*100).toFixed(1)}%)`);
+  console.log(`  English only:    ${pureEn.toLocaleString()} (${(pureEn/total*100).toFixed(1)}%)`);
+  console.log(`  Chinese only:    ${pureCn.toLocaleString()} (${(pureCn/total*100).toFixed(1)}%)`);
+  console.log(`  Mixed CN/EN:     ${mixed.toLocaleString()} (${(mixed/total*100).toFixed(1)}%)`);
+  console.log(`  Other:           ${other.toLocaleString()} (${(other/total*100).toFixed(1)}%)`);
 
   // ============================================
-  // 3. 高频词分析（分语言）
+  // 3. Top-word analysis (by language)
   // ============================================
-  console.log("\n📊 3. 高频词分析");
+  console.log("\n📊 3. Top-word analysis");
   console.log("-".repeat(70));
   const wordFreq = new Map<string, number>();
   for (const row of parsedRows) {
@@ -191,17 +191,17 @@ async function main() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 40);
 
-  console.log("  Top 40 词频（去停用词）:");
+  console.log("  Top 40 word frequencies (stopwords removed):");
   for (let i = 0; i < topWords.length; i++) {
     const [word, count] = topWords[i];
     const pctOfDocs = (count / total * 100).toFixed(1);
-    console.log(`    ${(i+1).toString().padStart(2)}. ${word.padEnd(20)} ${count.toString().padStart(6)}  (${pctOfDocs}% 文档)`);
+    console.log(`    ${(i+1).toString().padStart(2)}. ${word.padEnd(20)} ${count.toString().padStart(6)}  (${pctOfDocs}% of docs)`);
   }
 
   // ============================================
-  // 4. 文本前缀聚类（发现模板化内容）
+  // 4. Text prefix clustering (detect templated content)
   // ============================================
-  console.log("\n📊 4. 文本前缀聚类（发现模板化内容）");
+  console.log("\n📊 4. Text prefix clustering (detect templated content)");
   console.log("-".repeat(70));
   const prefixMap = new Map<string, number>();
   for (const row of parsedRows) {
@@ -213,20 +213,20 @@ async function main() {
     .filter(([, count]) => count >= 3)
     .sort((a, b) => b[1] - a[1]);
 
-  console.log(`  独立前缀数: ${prefixMap.size.toLocaleString()}`);
-  console.log(`  重复 ≥3 次的前缀: ${repeatedPrefixes.length}`);
+  console.log(`  Unique prefixes: ${prefixMap.size.toLocaleString()}`);
+  console.log(`  Prefixes repeated ≥3 times: ${repeatedPrefixes.length}`);
 
   if (repeatedPrefixes.length > 0) {
-    console.log("\n  Top 20 重复前缀:");
+    console.log("\n  Top 20 repeated prefixes:");
     for (const [prefix, count] of repeatedPrefixes.slice(0, 20)) {
       console.log(`    [×${count.toString().padStart(4)}] ${prefix}...`);
     }
   }
 
   // ============================================
-  // 5. Scope × Category 交叉分析
+  // 5. Scope × Category cross-analysis
   // ============================================
-  console.log("\n📊 5. Scope × Category 交叉分析（Top 10 Scope）");
+  console.log("\n📊 5. Scope × Category cross-analysis (Top 10 scopes)");
   console.log("-".repeat(70));
   const scopeCat = new Map<string, Map<string, number>>();
   for (const row of parsedRows) {
@@ -261,9 +261,9 @@ async function main() {
   }
 
   // ============================================
-  // 6. 时间模式分析
+  // 6. Temporal pattern analysis
   // ============================================
-  console.log("\n📊 6. 时间模式分析");
+  console.log("\n📊 6. Temporal pattern analysis");
   console.log("-".repeat(70));
 
   // By month
@@ -272,7 +272,7 @@ async function main() {
   const hourMap = new Map<number, number>();
   // By day of week
   const dowMap = new Map<number, number>();
-  const DOW_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   for (const row of parsedRows) {
     const d = new Date(row.timestamp);
@@ -284,7 +284,7 @@ async function main() {
 
   // Monthly trend
   const months = [...monthMap.entries()].sort();
-  console.log("  月度趋势:");
+  console.log("  Monthly trend:");
   const maxMonthCount = Math.max(...months.map(m => m[1]));
   for (const [month, count] of months) {
     const bar = "█".repeat(Math.round(count / maxMonthCount * 30));
@@ -292,7 +292,7 @@ async function main() {
   }
 
   // Hourly pattern
-  console.log("\n  小时分布:");
+  console.log("\n  Hourly distribution:");
   const maxHourCount = Math.max(...[...hourMap.values()]);
   for (let h = 0; h < 24; h++) {
     const count = hourMap.get(h) || 0;
@@ -301,7 +301,7 @@ async function main() {
   }
 
   // Day of week
-  console.log("\n  星期分布:");
+  console.log("\n  Day-of-week distribution:");
   for (let d = 0; d < 7; d++) {
     const count = dowMap.get(d) || 0;
     const pct = (count / total * 100).toFixed(1);
@@ -309,9 +309,9 @@ async function main() {
   }
 
   // ============================================
-  // 7. 过时内容检测
+  // 7. Stale content detection
   // ============================================
-  console.log("\n📊 7. 过时内容检测");
+  console.log("\n📊 7. Stale content detection");
   console.log("-".repeat(70));
 
   // Look for date references in text
@@ -324,30 +324,32 @@ async function main() {
       yearRefs.set(year, (yearRefs.get(year) || 0) + 1);
     }
   }
-  console.log("  文本中提到的年份:");
+  console.log("  Years referenced in text:");
   for (const [year, count] of [...yearRefs.entries()].sort()) {
-    console.log(`    ${year}: ${count.toLocaleString()} 次`);
+    console.log(`    ${year}: ${count.toLocaleString()} times`);
   }
 
   // Look for potentially outdated keywords
+  // NOTE: Chinese keywords below are functional scan terms matched against
+  // memory text (临时=temporary, 废弃=deprecated, 已删除=deleted, 待修复=to-fix).
   const outdatedKeywords = [
     "deprecated", "removed", "old", "legacy", "TODO", "FIXME", "HACK",
     "temporary", "workaround", "临时", "废弃", "已删除", "待修复",
   ];
-  console.log("\n  过时关键词扫描:");
+  console.log("\n  Stale keyword scan:");
   for (const kw of outdatedKeywords) {
     const count = parsedRows.filter(r =>
       r.text.toLowerCase().includes(kw.toLowerCase())
     ).length;
     if (count > 0) {
-      console.log(`    "${kw}": ${count} 条`);
+      console.log(`    "${kw}": ${count} entries`);
     }
   }
 
   // ============================================
-  // 8. 文本精确重复检测
+  // 8. Exact text duplicate detection
   // ============================================
-  console.log("\n📊 8. 精确/近似文本重复");
+  console.log("\n📊 8. Exact / near-duplicate text");
   console.log("-".repeat(70));
 
   // Exact text duplicates
@@ -358,12 +360,12 @@ async function main() {
   }
   const exactDups = [...textMap.entries()].filter(([, count]) => count > 1);
   const totalDupRows = exactDups.reduce((s, [, c]) => s + c, 0);
-  console.log(`  精确重复组: ${exactDups.length}`);
-  console.log(`  重复行总数: ${totalDupRows} / ${total} (${(totalDupRows/total*100).toFixed(1)}%)`);
+  console.log(`  Exact duplicate groups: ${exactDups.length}`);
+  console.log(`  Total duplicate rows: ${totalDupRows} / ${total} (${(totalDupRows/total*100).toFixed(1)}%)`);
 
   if (exactDups.length > 0) {
     const topDups = exactDups.sort((a, b) => b[1] - a[1]).slice(0, 10);
-    console.log("\n  Top 10 精确重复:");
+    console.log("\n  Top 10 exact duplicates:");
     for (const [text, count] of topDups) {
       console.log(`    [×${count}] ${text.slice(0, 80)}...`);
     }
@@ -377,13 +379,13 @@ async function main() {
   }
   const fpDups = [...fpMap.entries()].filter(([, count]) => count > 1);
   const fpDupRows = fpDups.reduce((s, [, c]) => s + c, 0);
-  console.log(`\n  前100字符重复组: ${fpDups.length}`);
-  console.log(`  相关行总数: ${fpDupRows} / ${total} (${(fpDupRows/total*100).toFixed(1)}%)`);
+  console.log(`\n  First-100-char duplicate groups: ${fpDups.length}`);
+  console.log(`  Related rows total: ${fpDupRows} / ${total} (${(fpDupRows/total*100).toFixed(1)}%)`);
 
   // ============================================
-  // 9. Scope 生态分析
+  // 9. Scope ecosystem analysis
   // ============================================
-  console.log("\n📊 9. Scope 生态分析");
+  console.log("\n📊 9. Scope ecosystem analysis");
   console.log("-".repeat(70));
 
   const scopeCounts = new Map<string, number>();
@@ -395,18 +397,18 @@ async function main() {
   const singletonScopes = [...scopeCounts.entries()].filter(([, c]) => c === 1).length;
   const tinyScopes = [...scopeCounts.entries()].filter(([, c]) => c <= 5 && c > 1).length;
 
-  console.log(`  总 scope 数: ${totalScopes}`);
-  console.log(`  单条 scope（孤儿）: ${singletonScopes} (${(singletonScopes/totalScopes*100).toFixed(1)}%)`);
-  console.log(`  2-5 条 scope: ${tinyScopes}`);
-  console.log(`  Top 1 scope 占比: ${(([...scopeCounts.values()].sort((a,b)=>b-a)[0] / total) * 100).toFixed(1)}%`);
+  console.log(`  Total scopes: ${totalScopes}`);
+  console.log(`  Single-entry scopes (orphans): ${singletonScopes} (${(singletonScopes/totalScopes*100).toFixed(1)}%)`);
+  console.log(`  2-5 entry scopes: ${tinyScopes}`);
+  console.log(`  Top-1 scope share: ${(([...scopeCounts.values()].sort((a,b)=>b-a)[0] / total) * 100).toFixed(1)}%`);
 
   // ============================================
-  // 10. 内容主题聚类（基于 embedding 采样）
+  // 10. Content topic clustering (embedding sample)
   // ============================================
   const clusterSampleSize = 2000;
-  console.log(`\n📊 10. Embedding 聚类采样（${clusterSampleSize} 条，K-Means k=8）`);
+  console.log(`\n📊 10. Embedding cluster sample (${clusterSampleSize} entries, K-Means k=8)`);
   console.log("-".repeat(70));
-  console.log("  ⏳ 读取向量数据...");
+  console.log("  ⏳ Loading vector data...");
 
   // Read vectors for sample
   const sampleWithVectors: MemoryRow[] = await table
@@ -419,9 +421,9 @@ async function main() {
   const K = 8;
   const dim = sampleWithVectors[0]?.vector?.length || 0;
   if (dim === 0) {
-    console.log("  ⚠️ 无向量数据，跳过聚类");
+    console.log("  ⚠️ No vector data; skipping clustering");
   } else {
-    console.log(`  向量维度: ${dim}`);
+    console.log(`  Vector dimension: ${dim}`);
 
     // Initialize centroids randomly
     const centroids: number[][] = [];
@@ -462,11 +464,11 @@ async function main() {
       clusters.get(assignments[i])!.push(sampleWithVectors[i]);
     }
 
-    console.log(`\n  聚类结果 (K=${K}):`);
+    console.log(`\n  Clustering results (K=${K}):`);
     const sortedClusters = [...clusters.entries()].sort((a, b) => b[1].length - a[1].length);
 
     for (const [k, members] of sortedClusters) {
-      console.log(`\n  ── Cluster ${k} (${members.length} 条, ${(members.length/sampleWithVectors.length*100).toFixed(1)}%) ──`);
+      console.log(`\n  ── Cluster ${k} (${members.length} entries, ${(members.length/sampleWithVectors.length*100).toFixed(1)}%) ──`);
 
       // Category distribution within cluster
       const clCatMap = new Map<string, number>();
@@ -477,7 +479,7 @@ async function main() {
         .sort((a, b) => b[1] - a[1])
         .map(([c, n]) => `${c}:${n}`)
         .join(", ");
-      console.log(`    类别: ${catStr}`);
+      console.log(`    Categories: ${catStr}`);
 
       // Top scopes
       const clScopeMap = new Map<string, number>();
@@ -505,10 +507,10 @@ async function main() {
         .slice(0, 8)
         .map(([w]) => w)
         .join(", ");
-      console.log(`    关键词: ${topClWords}`);
+      console.log(`    Keywords: ${topClWords}`);
 
       // Sample texts
-      console.log(`    示例:`);
+      console.log(`    Examples:`);
       const samples = members.slice(0, 3);
       for (const s of samples) {
         console.log(`      - ${s.text.slice(0, 100)}...`);
@@ -517,21 +519,21 @@ async function main() {
   }
 
   // ============================================
-  // 11. 异常值检测
+  // 11. Outlier detection
   // ============================================
-  console.log("\n📊 11. 异常值检测");
+  console.log("\n📊 11. Outlier detection");
   console.log("-".repeat(70));
 
   // Empty or near-empty scope
   const emptyScope = parsedRows.filter(r => !r.scope || r.scope.trim() === "").length;
-  console.log(`  空 scope: ${emptyScope} 条 (${(emptyScope/total*100).toFixed(1)}%)`);
+  console.log(`  Empty scope: ${emptyScope} entries (${(emptyScope/total*100).toFixed(1)}%)`);
 
   // Suspiciously high importance + zero access
   const highImpZeroAccess = parsedRows.filter(r => {
     const ac = r.meta.accessCount ?? r.meta.access_count ?? 0;
     return r.importance >= 0.8 && ac === 0;
   }).length;
-  console.log(`  高 importance(≥0.8) + 0 访问: ${highImpZeroAccess} 条`);
+  console.log(`  High importance (≥0.8) + 0 accesses: ${highImpZeroAccess} entries`);
 
   // Very old memories that are still "working" tier
   const oldWorking = parsedRows.filter(r => {
@@ -539,38 +541,38 @@ async function main() {
     const agedays = (Date.now() - r.timestamp) / (1000*60*60*24);
     return tier === "working" && agedays > 60;
   }).length;
-  console.log(`  >60天的 working tier 记忆: ${oldWorking} 条（应降级？）`);
+  console.log(`  Working-tier memories >60 days old: ${oldWorking} entries (should demote?)`);
 
   // Memories with no metadata
   const noMeta = parsedRows.filter(r => !r.metadata || r.metadata === "{}").length;
-  console.log(`  无 metadata: ${noMeta} 条`);
+  console.log(`  No metadata: ${noMeta} entries`);
 
   // ============================================
-  // 综合发现
+  // Overall findings
   // ============================================
   console.log("\n" + "=".repeat(70));
-  console.log("🔬 盲扫综合发现");
+  console.log("🔬 Blind scan — overall findings");
   console.log("=".repeat(70));
 
   const findings: string[] = [];
 
   if (exactDups.length > 0) {
-    findings.push(`📌 精确重复 ${exactDups.length} 组 / ${totalDupRows} 条 — 有清理空间`);
+    findings.push(`📌 Exact duplicates: ${exactDups.length} groups / ${totalDupRows} entries — room to clean up`);
   }
   if (ultraShort.length > 0) {
-    findings.push(`📌 超短文本 (<20字符) ${ultraShort.length} 条 — 可能是垃圾数据`);
+    findings.push(`📌 Ultra-short text (<20 chars): ${ultraShort.length} entries — likely junk data`);
   }
   if (singletonScopes > totalScopes * 0.5) {
-    findings.push(`📌 ${singletonScopes}/${totalScopes} scope 只有 1 条记忆 — scope 碎片化严重`);
+    findings.push(`📌 ${singletonScopes}/${totalScopes} scopes have only 1 memory — severe scope fragmentation`);
   }
   if (highImpZeroAccess > 100) {
-    findings.push(`📌 ${highImpZeroAccess} 条高重要性记忆从未被访问 — importance 标记可能虚高`);
+    findings.push(`📌 ${highImpZeroAccess} high-importance memories never accessed — importance may be inflated`);
   }
   if (mixed / total > 0.3) {
-    findings.push(`📌 ${(mixed/total*100).toFixed(1)}% 记忆中英混合 — 可能影响检索一致性`);
+    findings.push(`📌 ${(mixed/total*100).toFixed(1)}% of memories mix CN/EN — may affect retrieval consistency`);
   }
   if (emptyScope > total * 0.1) {
-    findings.push(`📌 ${(emptyScope/total*100).toFixed(1)}% 记忆无 scope — 检索时无法按项目过滤`);
+    findings.push(`📌 ${(emptyScope/total*100).toFixed(1)}% of memories have no scope — cannot filter by project at retrieval`);
   }
 
   for (const f of findings) {
@@ -578,11 +580,11 @@ async function main() {
   }
 
   if (findings.length === 0) {
-    console.log("  ✅ 未发现明显异常模式");
+    console.log("  ✅ No obvious anomalous patterns found");
   }
 
   console.log("\n" + "=".repeat(70));
-  console.log("📋 盲扫完成\n");
+  console.log("📋 Blind scan complete\n");
 }
 
 main().catch(console.error);

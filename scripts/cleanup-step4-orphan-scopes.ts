@@ -1,10 +1,10 @@
 /**
- * 清洗步骤 4：分析孤儿 scope（只有 1 条记忆的 scope）
- * 策略：不删记忆，而是把孤儿 scope 的记忆重新归类到更有意义的 scope
- * - accessCount=0 的孤儿 → 直接删（死记忆 + 孤儿 scope 双重废）
- * - accessCount>0 的孤儿 → 保留，只报告（不乱动有价值的）
+ * Cleanup step 4: analyze orphan scopes (scopes with only 1 memory)
+ * Strategy: instead of deleting memories, reclassify orphan-scope memories into more meaningful scopes
+ * - accessCount=0 orphans → delete outright (dead memory + orphan scope, doubly useless)
+ * - accessCount>0 orphans → keep, report only (don't touch anything valuable)
  *
- * 用法：
+ * Usage:
  *   bun run scripts/cleanup-step4-orphan-scopes.ts [--execute]
  */
 
@@ -25,20 +25,20 @@ interface MemoryRow {
 }
 
 async function main() {
-  console.log(`\n🧹 清洗步骤 4：孤儿 scope 清理 ${EXECUTE ? "[执行模式]" : "[预览模式]"}`);
+  console.log(`\n🧹 Cleanup step 4: orphan-scope cleanup ${EXECUTE ? "[execute mode]" : "[preview mode]"}`);
   console.log("=".repeat(60));
 
   const db = await lancedb.connect(DB_PATH);
   const table = await db.openTable(TABLE_NAME);
 
-  console.log("⏳ 读取全量数据...");
+  console.log("⏳ Loading all data...");
   const allRows: MemoryRow[] = await table
     .query()
     .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"])
     .toArray() as any;
 
   const total = allRows.length;
-  console.log(`✅ ${total.toLocaleString()} 条记忆\n`);
+  console.log(`✅ ${total.toLocaleString()} memories\n`);
 
   const parsedRows = allRows.map(row => ({
     ...row,
@@ -62,24 +62,24 @@ async function main() {
   const deadOrphans = orphanRows.filter(r => (r.meta.accessCount ?? r.meta.access_count ?? 0) === 0);
   const aliveOrphans = orphanRows.filter(r => (r.meta.accessCount ?? r.meta.access_count ?? 0) > 0);
 
-  console.log(`📊 孤儿 scope 统计:`);
-  console.log(`  孤儿 scope 总数:   ${orphanScopes.size}`);
-  console.log(`  死记忆孤儿:        ${deadOrphans.length} 条 → 可安全删除`);
-  console.log(`  活记忆孤儿:        ${aliveOrphans.length} 条 → 保留不动`);
+  console.log(`📊 Orphan scope statistics:`);
+  console.log(`  Total orphan scopes:   ${orphanScopes.size}`);
+  console.log(`  Dead-memory orphans:   ${deadOrphans.length} entries → safe to delete`);
+  console.log(`  Live-memory orphans:   ${aliveOrphans.length} entries → keep untouched`);
 
   // Category breakdown
   const deadCatMap = new Map<string, number>();
   for (const r of deadOrphans) {
     deadCatMap.set(r.category, (deadCatMap.get(r.category) || 0) + 1);
   }
-  console.log(`\n  死记忆孤儿按类别:`);
+  console.log(`\n  Dead-memory orphans by category:`);
   for (const [cat, count] of [...deadCatMap.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`    ${cat.padEnd(14)} ${count}`);
   }
 
   // Show alive orphan samples (these we keep)
   if (aliveOrphans.length > 0) {
-    console.log(`\n  活记忆孤儿示例（保留）:`);
+    console.log(`\n  Live-memory orphan samples (kept):`);
     for (const r of aliveOrphans.slice(0, 5)) {
       const ac = r.meta.accessCount ?? r.meta.access_count ?? 0;
       console.log(`    [${r.category}] [ac=${ac}] [scope=${r.scope.slice(0, 25)}] ${r.text.slice(0, 60)}...`);
@@ -87,7 +87,7 @@ async function main() {
   }
 
   // Show dead orphan samples
-  console.log(`\n  死记忆孤儿示例（待删）:`);
+  console.log(`\n  Dead-memory orphan samples (to delete):`);
   const samples = deadOrphans.sort(() => Math.random() - 0.5).slice(0, 10);
   for (const r of samples) {
     console.log(`    [${r.category}] [scope=${r.scope.slice(0, 25)}] ${r.text.slice(0, 60)}...`);
@@ -95,17 +95,17 @@ async function main() {
 
   const idsToDelete = deadOrphans.map(r => r.id);
 
-  console.log(`\n📊 清理计划:`);
-  console.log(`  待删除:    ${idsToDelete.length} 条（死记忆 + 孤儿 scope）`);
-  console.log(`  保留:      ${(total - idsToDelete.length).toLocaleString()} 条`);
-  console.log(`  瘦身比例:  ${(idsToDelete.length / total * 100).toFixed(1)}%`);
+  console.log(`\n📊 Cleanup plan:`);
+  console.log(`  To delete:  ${idsToDelete.length} entries (dead memory + orphan scope)`);
+  console.log(`  To keep:    ${(total - idsToDelete.length).toLocaleString()} entries`);
+  console.log(`  Reduction:  ${(idsToDelete.length / total * 100).toFixed(1)}%`);
 
   if (!EXECUTE) {
-    console.log(`\n⚠️  预览模式，未执行删除。加 --execute 参数执行。`);
+    console.log(`\n⚠️  Preview mode; no deletions performed. Pass --execute to run.`);
     return;
   }
 
-  console.log(`\n🔥 开始删除 ${idsToDelete.length} 条...`);
+  console.log(`\n🔥 Deleting ${idsToDelete.length} entries...`);
   const batchSize = 100;
   let deleted = 0;
 
@@ -121,11 +121,11 @@ async function main() {
   }
 
   const remaining = await table.countRows();
-  console.log(`\n✅ 删除完成！`);
-  console.log(`  删除前: ${total.toLocaleString()} 条`);
-  console.log(`  删除后: ${remaining.toLocaleString()} 条`);
-  console.log(`  实际删除: ${(total - remaining).toLocaleString()} 条`);
-  console.log(`  消灭孤儿 scope: ${deadOrphans.length} 个`);
+  console.log(`\n✅ Deletion complete!`);
+  console.log(`  Before: ${total.toLocaleString()} entries`);
+  console.log(`  After:  ${remaining.toLocaleString()} entries`);
+  console.log(`  Actually deleted: ${(total - remaining).toLocaleString()} entries`);
+  console.log(`  Orphan scopes eliminated: ${deadOrphans.length}`);
 }
 
 main().catch(console.error);
