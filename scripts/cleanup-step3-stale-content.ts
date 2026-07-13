@@ -1,9 +1,10 @@
 /**
- * 清洗步骤 3：标记/清理过时内容
- * 扫描含 temporary/临时/HACK/TODO/FIXME 的记忆
- * 只删 accessCount=0 且含这些关键词的（从未被用过的过时内容）
+ * Cleanup step 3: flag/clean up stale content
+ * Scans for memories containing temporary/临时/HACK/TODO/FIXME
+ * Only deletes those with accessCount=0 that also contain these keywords
+ * (stale content that has never been used)
  *
- * 用法：
+ * Usage:
  *   bun run scripts/cleanup-step3-stale-content.ts [--execute]
  */
 
@@ -13,6 +14,8 @@ const DB_PATH = "./data/lancedb";
 const TABLE_NAME = "memories";
 const EXECUTE = process.argv.includes("--execute");
 
+// NOTE: the Chinese entries are functional scan terms matched against memory
+// text (临时=temporary, 废弃=deprecated, 待修复=to-fix) — do not translate.
 const STALE_KEYWORDS = [
   "temporary", "临时", "HACK", "TODO", "FIXME",
   "workaround", "deprecated", "废弃", "待修复",
@@ -29,20 +32,20 @@ interface MemoryRow {
 }
 
 async function main() {
-  console.log(`\n🧹 清洗步骤 3：过时内容清理 ${EXECUTE ? "[执行模式]" : "[预览模式]"}`);
+  console.log(`\n🧹 Cleanup step 3: stale-content cleanup ${EXECUTE ? "[execute mode]" : "[preview mode]"}`);
   console.log("=".repeat(60));
 
   const db = await lancedb.connect(DB_PATH);
   const table = await db.openTable(TABLE_NAME);
 
-  console.log("⏳ 读取全量数据...");
+  console.log("⏳ Loading all data...");
   const allRows: MemoryRow[] = await table
     .query()
     .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"])
     .toArray() as any;
 
   const total = allRows.length;
-  console.log(`✅ ${total.toLocaleString()} 条记忆\n`);
+  console.log(`✅ ${total.toLocaleString()} memories\n`);
 
   const parsedRows = allRows.map(row => ({
     ...row,
@@ -64,13 +67,13 @@ async function main() {
     }
   }
 
-  console.log("📊 关键词命中统计:");
+  console.log("📊 Keyword hit statistics:");
   let totalHits = 0;
   for (const kw of STALE_KEYWORDS) {
     const hits = keywordHits.get(kw)!;
     if (hits.length > 0) {
       const deadHits = hits.filter(r => (r.meta.accessCount ?? r.meta.access_count ?? 0) === 0);
-      console.log(`  "${kw}": ${hits.length} 条 (其中 ${deadHits.length} 条从未访问)`);
+      console.log(`  "${kw}": ${hits.length} entries (${deadHits.length} never accessed)`);
     }
   }
 
@@ -96,23 +99,23 @@ async function main() {
 
   const idsToDelete = [...idsToDeleteSet];
 
-  console.log(`\n📊 清理范围（仅 accessCount=0 + 含过时关键词）:`);
-  console.log(`  待删除条数:   ${idsToDelete.length.toLocaleString()}`);
-  console.log(`  保留条数:     ${(total - idsToDelete.length).toLocaleString()}`);
-  console.log(`  瘦身比例:     ${(idsToDelete.length / total * 100).toFixed(1)}%`);
+  console.log(`\n📊 Cleanup scope (only accessCount=0 + contains stale keywords):`);
+  console.log(`  To delete:  ${idsToDelete.length.toLocaleString()}`);
+  console.log(`  To keep:    ${(total - idsToDelete.length).toLocaleString()}`);
+  console.log(`  Reduction:  ${(idsToDelete.length / total * 100).toFixed(1)}%`);
 
   // Category breakdown of what we're deleting
   const catBreakdown = new Map<string, number>();
   for (const row of deleteCandidates) {
     catBreakdown.set(row.category, (catBreakdown.get(row.category) || 0) + 1);
   }
-  console.log(`\n  待删除按类别:`);
+  console.log(`\n  To delete, by category:`);
   for (const [cat, count] of [...catBreakdown.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`    ${cat.padEnd(14)} ${count}`);
   }
 
   // Show samples
-  console.log(`\n  待删除示例（随机 10 条）:`);
+  console.log(`\n  Deletion samples (10 random):`);
   const shuffled = deleteCandidates.sort(() => Math.random() - 0.5).slice(0, 10);
   for (const row of shuffled) {
     const matched = STALE_KEYWORDS.find(kw => row.text.toLowerCase().includes(kw.toLowerCase()));
@@ -120,11 +123,11 @@ async function main() {
   }
 
   if (!EXECUTE) {
-    console.log(`\n⚠️  预览模式，未执行删除。加 --execute 参数执行。`);
+    console.log(`\n⚠️  Preview mode; no deletions performed. Pass --execute to run.`);
     return;
   }
 
-  console.log(`\n🔥 开始删除 ${idsToDelete.length.toLocaleString()} 条...`);
+  console.log(`\n🔥 Deleting ${idsToDelete.length.toLocaleString()} entries...`);
   const batchSize = 100;
   let deleted = 0;
 
@@ -140,10 +143,10 @@ async function main() {
   }
 
   const remaining = await table.countRows();
-  console.log(`\n✅ 删除完成！`);
-  console.log(`  删除前: ${total.toLocaleString()} 条`);
-  console.log(`  删除后: ${remaining.toLocaleString()} 条`);
-  console.log(`  实际删除: ${(total - remaining).toLocaleString()} 条`);
+  console.log(`\n✅ Deletion complete!`);
+  console.log(`  Before: ${total.toLocaleString()} entries`);
+  console.log(`  After:  ${remaining.toLocaleString()} entries`);
+  console.log(`  Actually deleted: ${(total - remaining).toLocaleString()} entries`);
 }
 
 main().catch(console.error);
