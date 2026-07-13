@@ -85,7 +85,8 @@ function shouldRegisterTool(toolName: string): boolean {
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { autoRegisterBabelMemory } from "./language-hook.js";
 import { z, type ZodRawShape } from "zod";
-import type { RetrievalResult } from "./retriever.js";
+import { filterResultSet } from "./retriever.js";
+import type { RetrievalResult, RetrievalResultSet } from "./retriever.js";
 import type { MemoryStore } from "./store.js";
 import { distillResults, formatExplainResults, formatSearchResults, formatBriefResults, formatFullResults, selectBriefSeedResults, summarizeResults } from "./memory-output.js";
 import { archiveDirtyBriefAsset, assetSummaryLine, buildBriefAsset, buildPinAsset, listDirtyBriefAssets, listMemoryAssets, listPinAssets, saveBriefAsset, savePinAsset, writeExportArtifact } from "./memory-assets.js";
@@ -944,7 +945,10 @@ registerTool(
     if (reconstruct && llm) retriever.setLLMClient(llm);
     let results = await retriever.retrieve(buildRetrievalContext({
       query,
-      limit: (after || before || topicTag) ? limit * 3 : limit,
+      // Over-fetch for after/before so the handler's own temporal filter can
+      // still fill the limit. topicTag no longer inflates here — the retriever
+      // over-fetches for topicTag internally and caps to the requested limit.
+      limit: (after || before) ? limit * 3 : limit,
       category,
       scope,
       sessionId,
@@ -954,7 +958,8 @@ registerTool(
       topicTag,
       reconstruct,
       // F3: Temporal validity filtering
-      validAt: validAt ? new Date(validAt).getTime() : undefined,
+      // Coalesce an unparseable date (NaN) to undefined, matching after/before.
+      validAt: validAt ? (new Date(validAt).getTime() || undefined) : undefined,
       includeExpired: includeExpired ?? undefined,
     }, {
       operation: "search_memory",
@@ -969,9 +974,13 @@ registerTool(
         anchor: `${after || ""}..${before || ""}`,
       };
       if (constraint.startMs || constraint.endMs) {
-        results = results
-          .filter(r => matchesTemporalConstraint(r.entry.timestamp, constraint))
-          .slice(0, limit);
+        // Use filterResultSet so the attached reconstruction survives — a plain
+        // filter/slice would drop it and silently discard the reconstruction.
+        results = filterResultSet(
+          results as RetrievalResultSet,
+          r => matchesTemporalConstraint(r.entry.timestamp, constraint),
+          limit,
+        );
       }
     }
 

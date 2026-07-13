@@ -207,7 +207,11 @@ function collectUncoveredTopicSignals(
       type: "uncovered_topic",
       trigger: topic,
       action: `No recent memories for queried topic "${topic}" — consider storing relevant context`,
-      weight: 0.65,
+      // A topic only reaches here when a query genuinely found no coverage, so
+      // the raw signal is strong. Emit a high weight: with typeWeight 0.65 the
+      // final confidence must clear CONFIDENCE_THRESHOLD (0.6) or the signal
+      // type is dead (0.65 * 0.65 = 0.42 was always filtered out).
+      weight: 0.95,
       evidence: [`Topic "${topic}" appeared in queries but has no recent memory coverage`],
     });
   }

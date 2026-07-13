@@ -191,6 +191,24 @@ export type RetrievalResultSet = RetrievalResult[] & {
   reconstruction?: ReconstructionOutput;
 };
 
+/**
+ * Filter (and optionally cap) a result set while preserving the attached
+ * `reconstruction`. A plain Array.prototype.filter/slice returns a fresh array
+ * that drops non-index own properties, silently losing the reconstruction that
+ * the retriever attached to the RetrievalResultSet.
+ */
+export function filterResultSet(
+  set: RetrievalResultSet,
+  predicate: (result: RetrievalResult) => boolean,
+  limit?: number,
+): RetrievalResultSet {
+  const filtered = set.filter(predicate);
+  const capped = limit != null ? filtered.slice(0, limit) : filtered;
+  const out = capped as RetrievalResultSet;
+  if (set.reconstruction !== undefined) out.reconstruction = set.reconstruction;
+  return out;
+}
+
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -246,19 +264,24 @@ function clamp01(value: number, fallback: number): number {
  * - Expired memories (validUntil < now) are demoted by 80% or excluded.
  * - validAt: only return memories valid at a specific point in time.
  */
-function filterByValidity(
+export function filterByValidity(
   results: RetrievalResult[],
   now: number,
   options: { validAt?: number; includeExpired?: boolean },
 ): RetrievalResult[] {
   const { validAt, includeExpired } = options;
-  const checkTime = validAt ?? now;
+  // A NaN validAt (e.g. from an unparseable date) must NOT enter the
+  // point-in-time branch: NaN passes `!= null` but every comparison against it
+  // is false, which would return all candidates AND skip the normal expiry
+  // exclusion. Treat it as "no point-in-time filter".
+  const validAtSafe = validAt != null && !Number.isNaN(validAt) ? validAt : undefined;
+  const checkTime = validAtSafe ?? now;
 
   return results.reduce<RetrievalResult[]>((acc, r) => {
     const evo = parseEvolution(r.entry.metadata, r.entry.timestamp);
 
     // Point-in-time query: skip memories not yet valid or already expired at checkTime
-    if (validAt != null) {
+    if (validAtSafe != null) {
       if (evo.validFrom > checkTime) return acc; // not yet valid
       if (evo.validUntil != null && evo.validUntil < checkTime) {
         if (!includeExpired) return acc;
@@ -281,6 +304,12 @@ function filterByValidity(
     return acc;
   }, []);
 }
+
+/** MP-1: Over-fetch multiplier for topicTag queries so post-filtering can still
+ *  fill the requested limit from tag-matching entries ranked below the top-N. */
+const TOPIC_TAG_OVERFETCH_FACTOR = 5;
+/** Absolute cap on the topicTag over-fetch pool to bound retrieval cost. */
+const TOPIC_TAG_OVERFETCH_MAX = 200;
 
 /** P0.1: Short query detection — ≤ 4 tokens (CJK chars count as 1 token each). */
 const SHORT_QUERY_TOKEN_THRESHOLD = 4;
@@ -690,6 +719,14 @@ export class MemoryRetriever {
     const { query, limit, scopeFilter, category, includeArchived, trace, graph } = context;
     const safeLimit = clampInt(limit, 1, 100);
 
+    // When a topicTag filter will prune results, fetch a larger candidate pool
+    // first: tag-matching entries may rank below the top-safeLimit by score, so
+    // filtering a safeLimit-sized pool would under-return (or empty) the result
+    // even though matches exist. Over-fetch, then filter, then cap to safeLimit.
+    const fetchLimit = context.topicTag
+      ? clampInt(safeLimit * TOPIC_TAG_OVERFETCH_FACTOR, 1, TOPIC_TAG_OVERFETCH_MAX)
+      : safeLimit;
+
     // Adaptive retrieval: skip trivial queries to save embedding API calls
     if (shouldSkipRetrieval(query)) {
       return [];
@@ -699,10 +736,10 @@ export class MemoryRetriever {
 
     // For vector-only mode, use legacy behavior
     if (this.config.mode === "vector" || !this.store.hasFtsSupport) {
-      results = await this.vectorOnlyRetrieval(query, safeLimit, scopeFilter, category, includeArchived, trace);
+      results = await this.vectorOnlyRetrieval(query, fetchLimit, scopeFilter, category, includeArchived, trace);
     } else {
       // Hybrid retrieval with vector + BM25 + RRF fusion (+ optional PPR graph)
-      results = await this.hybridRetrieval(query, safeLimit, scopeFilter, category, includeArchived, trace, graph);
+      results = await this.hybridRetrieval(query, fetchLimit, scopeFilter, category, includeArchived, trace, graph);
     }
 
     // LME-2: Multi-hop retrieval — extract entities from first-pass results,
@@ -727,6 +764,12 @@ export class MemoryRetriever {
         validAt: context.validAt,
         includeExpired: context.includeExpired,
       });
+    }
+
+    // Cap the over-fetched topicTag pool back to the requested limit, AFTER the
+    // tag/validity filters, so surviving tagged matches fill the limit.
+    if (context.topicTag && results.length > safeLimit) {
+      results = results.slice(0, safeLimit);
     }
 
     // P0.2: Record frequency hits for returned results (manual queries only)
