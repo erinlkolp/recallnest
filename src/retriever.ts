@@ -305,6 +305,12 @@ export function filterByValidity(
   }, []);
 }
 
+/** MP-1: Over-fetch multiplier for topicTag queries so post-filtering can still
+ *  fill the requested limit from tag-matching entries ranked below the top-N. */
+const TOPIC_TAG_OVERFETCH_FACTOR = 5;
+/** Absolute cap on the topicTag over-fetch pool to bound retrieval cost. */
+const TOPIC_TAG_OVERFETCH_MAX = 200;
+
 /** P0.1: Short query detection — ≤ 4 tokens (CJK chars count as 1 token each). */
 const SHORT_QUERY_TOKEN_THRESHOLD = 4;
 
@@ -713,6 +719,14 @@ export class MemoryRetriever {
     const { query, limit, scopeFilter, category, includeArchived, trace, graph } = context;
     const safeLimit = clampInt(limit, 1, 100);
 
+    // When a topicTag filter will prune results, fetch a larger candidate pool
+    // first: tag-matching entries may rank below the top-safeLimit by score, so
+    // filtering a safeLimit-sized pool would under-return (or empty) the result
+    // even though matches exist. Over-fetch, then filter, then cap to safeLimit.
+    const fetchLimit = context.topicTag
+      ? clampInt(safeLimit * TOPIC_TAG_OVERFETCH_FACTOR, 1, TOPIC_TAG_OVERFETCH_MAX)
+      : safeLimit;
+
     // Adaptive retrieval: skip trivial queries to save embedding API calls
     if (shouldSkipRetrieval(query)) {
       return [];
@@ -722,10 +736,10 @@ export class MemoryRetriever {
 
     // For vector-only mode, use legacy behavior
     if (this.config.mode === "vector" || !this.store.hasFtsSupport) {
-      results = await this.vectorOnlyRetrieval(query, safeLimit, scopeFilter, category, includeArchived, trace);
+      results = await this.vectorOnlyRetrieval(query, fetchLimit, scopeFilter, category, includeArchived, trace);
     } else {
       // Hybrid retrieval with vector + BM25 + RRF fusion (+ optional PPR graph)
-      results = await this.hybridRetrieval(query, safeLimit, scopeFilter, category, includeArchived, trace, graph);
+      results = await this.hybridRetrieval(query, fetchLimit, scopeFilter, category, includeArchived, trace, graph);
     }
 
     // LME-2: Multi-hop retrieval — extract entities from first-pass results,
@@ -750,6 +764,12 @@ export class MemoryRetriever {
         validAt: context.validAt,
         includeExpired: context.includeExpired,
       });
+    }
+
+    // Cap the over-fetched topicTag pool back to the requested limit, AFTER the
+    // tag/validity filters, so surviving tagged matches fill the limit.
+    if (context.topicTag && results.length > safeLimit) {
+      results = results.slice(0, safeLimit);
     }
 
     // P0.2: Record frequency hits for returned results (manual queries only)

@@ -945,7 +945,10 @@ registerTool(
     if (reconstruct && llm) retriever.setLLMClient(llm);
     let results = await retriever.retrieve(buildRetrievalContext({
       query,
-      limit: (after || before || topicTag) ? limit * 3 : limit,
+      // Over-fetch for after/before so the handler's own temporal filter can
+      // still fill the limit. topicTag no longer inflates here — the retriever
+      // over-fetches for topicTag internally and caps to the requested limit.
+      limit: (after || before) ? limit * 3 : limit,
       category,
       scope,
       sessionId,
