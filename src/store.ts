@@ -660,7 +660,13 @@ export class MemoryStore {
     return true;
   }
 
-  async list(scopeFilter?: string[], category?: string, limit = 20, offset = 0): Promise<MemoryEntry[]> {
+  async list(
+    scopeFilter?: string[],
+    category?: string,
+    limit = 20,
+    offset = 0,
+    order: "asc" | "desc" = "desc",
+  ): Promise<MemoryEntry[]> {
     await this.ensureInitialized();
 
     let query = this.table!.query();
@@ -697,7 +703,11 @@ export class MemoryStore {
         timestamp: Number(row.timestamp),
         metadata: (row.metadata as string) || "{}",
       }))
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .sort((a, b) =>
+        order === "asc"
+          ? (a.timestamp || 0) - (b.timestamp || 0)
+          : (b.timestamp || 0) - (a.timestamp || 0),
+      )
       .slice(offset, offset + limit);
   }
 

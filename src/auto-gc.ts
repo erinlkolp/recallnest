@@ -35,6 +35,8 @@ export interface AutoGcConfig {
   maxArchivePerRun: number;
   /** Minimum age in days before a memory can be archived (default: 30) */
   minAgeDays: number;
+  /** Max entries to scan per run — the scan window (default: 5000) */
+  maxScanPerRun: number;
 }
 
 export const DEFAULT_AUTO_GC_CONFIG: AutoGcConfig = {
@@ -43,6 +45,7 @@ export const DEFAULT_AUTO_GC_CONFIG: AutoGcConfig = {
   decayScoreThreshold: 0.15,
   maxArchivePerRun: 100,
   minAgeDays: 30,
+  maxScanPerRun: 5000,
 };
 
 // ---------------------------------------------------------------------------
@@ -71,12 +74,22 @@ export interface GcResult {
  * - Composite decay_score < threshold (default 0.15)
  * - Age > minAgeDays (default 30 days)
  * - Not pinned (importance >= 0.95 is considered pinned)
+ *
+ * Scoping (bug #5): when `scope` is provided (e.g. from a per-scope dream run),
+ * the archival scan is restricted to that scope so GC can never archive another
+ * project's memories. When omitted, the scan is global (maintenance-wide).
+ *
+ * Scan window (bug #4): the scan lists OLDEST-first (`order: "asc"`) because the
+ * archive candidates are always the oldest, lowest-value memories. Listing
+ * newest-first meant that on stores larger than the scan window the prime
+ * candidates were never even examined.
  */
 export async function maybeRunGc(
   store: MemoryStore,
   config: AutoGcConfig = DEFAULT_AUTO_GC_CONFIG,
   retentionConfigDir?: string,
   auditLogger?: AuditLogger,
+  scope?: string,
 ): Promise<GcResult> {
   const stats = await store.stats();
   const totalMemories = stats.totalCount ?? 0;
@@ -99,8 +112,13 @@ export async function maybeRunGc(
   let archivedCount = 0;
   let totalChecked = 0;
 
-  // Scan memories by listing them
-  const entries = await store.list(undefined, undefined, 5000, 0);
+  // Scan memories by listing them. Scope-restricted when a scope is given (bug #5)
+  // and oldest-first so the true archive candidates are the ones examined (bug #4).
+  const scopeFilter = scope ? [scope] : undefined;
+  // Fall back to the default window if a partial config omitted maxScanPerRun,
+  // so the scan never silently collapses to store.list's default limit.
+  const scanLimit = config.maxScanPerRun ?? DEFAULT_AUTO_GC_CONFIG.maxScanPerRun;
+  const entries = await store.list(scopeFilter, undefined, scanLimit, 0, "asc");
   totalChecked = entries.length;
 
   // Pre-compute per-scope active memory counts and cache retention policies.
