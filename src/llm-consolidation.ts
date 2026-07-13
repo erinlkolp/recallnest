@@ -13,7 +13,7 @@
  */
 
 import type { LLMClient } from "./llm-client.js";
-import type { MemoryEntry } from "./store.js";
+import type { MemoryEntry, MemoryStore } from "./store.js";
 import { createVersionGroup } from "./version-manager.js";
 import { logInfo, logWarn } from "./stderr-log.js";
 
@@ -150,6 +150,50 @@ export async function executeMergeDecisions(
   }
 
   return mergeCount;
+}
+
+/**
+ * Discover clusters the base engine linked (via `cluster_members` metadata) and
+ * let the LLM decide which to merge into version groups. Extracted from the
+ * former `maybeConsolidate` wrapper so the dream pipeline can invoke it directly
+ * (see dream-pipeline consolidate phase). Clusters already merged into a
+ * version group are skipped. Returns the number of merges performed; no-ops
+ * (returns 0, never touches the LLM) when no unmerged clusters exist.
+ */
+export async function runLlmClusterMerges(params: {
+  store: MemoryStore;
+  scope: string;
+  llm: LLMClient;
+  /** Max entries to scan for linked clusters (default: 500) */
+  maxEntries?: number;
+}): Promise<number> {
+  const { store, scope, llm, maxEntries = 500 } = params;
+
+  const allEntries = await store.list([scope], undefined, maxEntries);
+  const clusterMap = new Map<string, MemoryEntry[]>();
+
+  for (const entry of allEntries) {
+    try {
+      const meta = JSON.parse(entry.metadata || "{}");
+      const members = meta.cluster_members as string[] | undefined;
+      if (Array.isArray(members) && members.length > 0 && !meta.version_group) {
+        const cluster = [entry];
+        for (const memberId of members) {
+          const member = await store.getById(memberId);
+          if (member) cluster.push(member);
+        }
+        if (cluster.length >= 2) clusterMap.set(entry.id, cluster);
+      }
+    } catch { /* skip malformed metadata */ }
+  }
+
+  let llmMerges = 0;
+  for (const [, cluster] of clusterMap) {
+    const decision = await evaluateCluster(llm, cluster);
+    llmMerges += await executeMergeDecisions(store, cluster, decision, scope);
+  }
+
+  return llmMerges;
 }
 
 // ============================================================================

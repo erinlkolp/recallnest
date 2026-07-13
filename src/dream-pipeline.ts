@@ -18,6 +18,7 @@ import type { MemoryEntry, MemoryStore } from "./store.js";
 import type { LLMClient } from "./llm-client.js";
 import type { Embedder } from "./embedder.js";
 import { ConsolidationEngine, clusterAndConsolidate, DEFAULT_CONSOLIDATION_CONFIG } from "./consolidation-engine.js";
+import { isLLMConsolidationEnabled, runLlmClusterMerges } from "./llm-consolidation.js";
 import { maybeRunGc, type GcResult, type AutoGcConfig, DEFAULT_AUTO_GC_CONFIG } from "./auto-gc.js";
 import { getWriteCount, resetWriteCount } from "./activity-counter.js";
 import { isActiveMemory } from "./memory-evolution.js";
@@ -132,11 +133,13 @@ async function runRebalancePhase(
     // Skip entries pinned between gather and apply.
     if (current.importance >= PINNED_IMPORTANCE_THRESHOLD) continue;
 
+    // #9: importance is authoritative in the store column only. Persist the tier
+    // into metadata but never mirror importance there (and strip any legacy copy).
     const nextMetadata: Record<string, unknown> = {
       ...parseMemoryHealthMetadata(current.metadata),
       tier: plan.targetTier,
-      importance: plan.nextImportance,
     };
+    delete nextMetadata.importance;
     await store.update(plan.id, {
       importance: plan.nextImportance,
       metadata: JSON.stringify(nextMetadata),
@@ -241,6 +244,19 @@ export async function runDream(params: {
   const consolidation = await engine.run(scope);
   stats.clustersFound += consolidation.clustersFound;
   stats.mergedCount += consolidation.mergedCount;
+
+  // 3a.1: LLM-driven version-group merges on the clusters the engine just
+  // linked (#3 — formerly the unwired maybeConsolidate). Behind
+  // RECALLNEST_LLM_CONSOLIDATION; no-ops without an LLM or unmerged clusters.
+  if (llm && isLLMConsolidationEnabled()) {
+    const llmMerges = await runLlmClusterMerges({
+      store,
+      scope,
+      llm,
+      maxEntries: config.maxEntriesPerRun,
+    });
+    stats.mergedCount += llmMerges;
+  }
 
   // 3b: LLM-driven cluster consolidation (insights + patterns) — requires LLM
   if (llm) {

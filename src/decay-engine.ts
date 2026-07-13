@@ -140,8 +140,9 @@ export function isDecayExempt(
   try {
     const meta = JSON.parse(metadata) as Record<string, unknown>;
 
-    // Rule 1: Core + very high importance
-    const tier = meta.tier ?? resolveTierFromMeta(meta);
+    // Rule 1: Core + very high importance. Pass the authoritative column
+    // importance so tier resolution never relies on a stale metadata copy (#9).
+    const tier = meta.tier ?? resolveTierFromMeta(meta, importance);
     if (tier === "core" && importance >= 0.95) return true;
 
     // Rule 2: Accessed within last 7 days
@@ -158,12 +159,18 @@ export function isDecayExempt(
   }
 }
 
-/** Internal helper: resolve tier from parsed metadata (avoids re-parsing). */
-function resolveTierFromMeta(meta: Record<string, unknown>): MemoryTier {
+/**
+ * Internal helper: resolve tier from parsed metadata (avoids re-parsing).
+ * When `importance` (the authoritative store-column value) is provided it wins
+ * over the possibly-stale `metadata.importance` mirror (#9).
+ */
+function resolveTierFromMeta(meta: Record<string, unknown>, importance?: number): MemoryTier {
   if (meta.tier === "core" || meta.tier === "working" || meta.tier === "peripheral") {
     return meta.tier;
   }
-  const imp = typeof meta.importance === "number" ? meta.importance : 0;
+  const imp = typeof importance === "number"
+    ? importance
+    : (typeof meta.importance === "number" ? meta.importance : 0);
   const ac = typeof meta.accessCount === "number" ? meta.accessCount : 0;
   if (imp >= 0.95 || ac >= 10) return "core";
   if (imp >= 0.8 || ac >= 3) return "working";
@@ -177,8 +184,12 @@ function resolveTierFromMeta(meta: Record<string, unknown>): MemoryTier {
 /**
  * Determine a memory's current tier from its metadata.
  * Falls back to heuristic based on importance if no tier is stored.
+ *
+ * `importance` is the authoritative store-column value; when provided it is
+ * used for the heuristic instead of the possibly-stale `metadata.importance`
+ * mirror (#9). Callers that have the entry should always pass `entry.importance`.
  */
-export function resolveTier(metadata?: string): MemoryTier {
+export function resolveTier(metadata?: string, importance?: number): MemoryTier {
   if (!metadata) return "peripheral";
 
   try {
@@ -193,11 +204,13 @@ export function resolveTier(metadata?: string): MemoryTier {
     // - Pinned assets (importance ≥ 0.95) → core
     // - High importance (≥ 0.8) → working
     // - Everything else → peripheral
-    const importance = typeof meta.importance === "number" ? meta.importance : 0;
+    const imp = typeof importance === "number"
+      ? importance
+      : (typeof meta.importance === "number" ? meta.importance : 0);
     const accessCount = typeof meta.accessCount === "number" ? meta.accessCount : 0;
 
-    if (importance >= 0.95 || accessCount >= 10) return "core";
-    if (importance >= 0.8 || accessCount >= 3) return "working";
+    if (imp >= 0.95 || accessCount >= 10) return "core";
+    if (imp >= 0.8 || accessCount >= 3) return "working";
     return "peripheral";
   } catch {
     return "peripheral";

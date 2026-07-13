@@ -166,11 +166,14 @@ export function buildMemoryHealthRebalancePlan(
     recencySignal,
   );
 
+  // #9: importance lives in the authoritative store column, not in metadata.
+  // Persist only the tier here; the column update carries nextImportance.
   const nextMetadata: Record<string, unknown> = {
     ...currentMetadata,
     tier: targetTier,
-    importance: nextImportance,
   };
+  // Never leave a stale importance mirror behind on entries that still have one.
+  delete nextMetadata.importance;
 
   const tierChanged = currentTier !== targetTier;
   const tierBackfilled = currentTier === "unknown";
@@ -192,7 +195,10 @@ export function buildMemoryHealthRebalancePlan(
     deadMemoryRow,
     deadMemoryDemoted,
     importanceChanged,
-    changed: tierChanged || importanceChanged || !("importance" in currentMetadata),
+    // #9: importance is no longer mirrored into metadata, so its absence is
+    // expected and must NOT force a rewrite. A plan is changed only when the
+    // tier or the (column) importance actually changes.
+    changed: tierChanged || importanceChanged,
   };
 }
 
