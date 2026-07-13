@@ -274,7 +274,8 @@ export async function runDream(params: {
   // =========================================================================
   // Phase 4: Prune — archive low-value memories
   // =========================================================================
-  const gcResult = await maybeRunGc(store, config.gc);
+  // Scope GC to this dream's scope so it never archives another scope's memories.
+  const gcResult = await maybeRunGc(store, config.gc, undefined, undefined, scope);
   stats.archivedCount = gcResult.archivedCount;
 
   phases.push({
