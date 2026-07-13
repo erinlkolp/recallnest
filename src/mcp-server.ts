@@ -954,7 +954,8 @@ registerTool(
       topicTag,
       reconstruct,
       // F3: Temporal validity filtering
-      validAt: validAt ? new Date(validAt).getTime() : undefined,
+      // Coalesce an unparseable date (NaN) to undefined, matching after/before.
+      validAt: validAt ? (new Date(validAt).getTime() || undefined) : undefined,
       includeExpired: includeExpired ?? undefined,
     }, {
       operation: "search_memory",

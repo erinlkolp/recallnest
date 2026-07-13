@@ -246,19 +246,24 @@ function clamp01(value: number, fallback: number): number {
  * - Expired memories (validUntil < now) are demoted by 80% or excluded.
  * - validAt: only return memories valid at a specific point in time.
  */
-function filterByValidity(
+export function filterByValidity(
   results: RetrievalResult[],
   now: number,
   options: { validAt?: number; includeExpired?: boolean },
 ): RetrievalResult[] {
   const { validAt, includeExpired } = options;
-  const checkTime = validAt ?? now;
+  // A NaN validAt (e.g. from an unparseable date) must NOT enter the
+  // point-in-time branch: NaN passes `!= null` but every comparison against it
+  // is false, which would return all candidates AND skip the normal expiry
+  // exclusion. Treat it as "no point-in-time filter".
+  const validAtSafe = validAt != null && !Number.isNaN(validAt) ? validAt : undefined;
+  const checkTime = validAtSafe ?? now;
 
   return results.reduce<RetrievalResult[]>((acc, r) => {
     const evo = parseEvolution(r.entry.metadata, r.entry.timestamp);
 
     // Point-in-time query: skip memories not yet valid or already expired at checkTime
-    if (validAt != null) {
+    if (validAtSafe != null) {
       if (evo.validFrom > checkTime) return acc; // not yet valid
       if (evo.validUntil != null && evo.validUntil < checkTime) {
         if (!includeExpired) return acc;
