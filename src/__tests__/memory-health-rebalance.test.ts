@@ -40,7 +40,27 @@ describe("memory health rebalance", () => {
     expect(plan.nextImportance).toBeGreaterThanOrEqual(0.3);
     expect(plan.nextImportance).toBeLessThanOrEqual(0.5);
     expect(plan.nextMetadata.tier).toBe("peripheral");
-    expect(plan.nextMetadata.importance).toBe(plan.nextImportance);
+    // #9: importance is authoritative in the store column, not persisted into
+    // metadata — nextMetadata must NOT carry an importance key.
+    expect("importance" in plan.nextMetadata).toBe(false);
+  });
+
+  it("does not flag an entry changed merely because metadata lacks importance (#9)", () => {
+    // Fixed point for the peripheral dead-memory path with recencySignal 0.5
+    // (maxTimestamp == minTimestamp): nextImportance == currentImportance at 0.397,
+    // so both tierChanged and importanceChanged are false. Before the #9 fix the
+    // "importance absent from metadata" backfill clause forced changed=true.
+    const T = Date.parse("2026-03-10T00:00:00.000Z");
+    const plan = buildMemoryHealthRebalancePlan({
+      id: "stable",
+      importance: 0.397,
+      timestamp: T,
+      metadata: JSON.stringify({ tier: "peripheral", accessCount: 0 }),
+    }, { maxAccessCount: 5, minTimestamp: T, maxTimestamp: T });
+
+    expect(plan.tierChanged).toBe(false);
+    expect(plan.importanceChanged).toBe(false);
+    expect(plan.changed).toBe(false);
   });
 
   it("backfills unknown tiers from access counts", () => {

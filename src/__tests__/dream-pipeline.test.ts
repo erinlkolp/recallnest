@@ -195,6 +195,67 @@ describe("runDream", () => {
     expect(typeof result.stats.mergedCount).toBe("number");
     expect(typeof result.stats.archivedCount).toBe("number");
   });
+
+  // #3: the LLM version-group merge (formerly in the unwired maybeConsolidate)
+  // is now wired into the dream consolidate phase, behind RECALLNEST_LLM_CONSOLIDATION.
+  function makeClusterableEntries(): MemoryEntry[] {
+    return [
+      makeEntry({ id: "a", vector: [0.9, 0.1, 0, 0, 0] }),
+      makeEntry({ id: "b", vector: [0.88, 0.12, 0, 0, 0] }),
+      makeEntry({ id: "c", vector: [0.92, 0.08, 0, 0, 0] }),
+    ];
+  }
+
+  function makeConsolidationLLM(onSynth: () => void): LLMClient {
+    return {
+      async generateL0() { return "consolidated insight"; },
+      async extractPattern() { return "discovered pattern"; },
+      // synthesizeFragments is used ONLY by the LLM merge path (evaluateCluster).
+      async synthesizeFragments() {
+        onSynth();
+        return '{"mergeGroups":[],"keepSeparate":[0,1,2],"reasoning":"distinct"}';
+      },
+    } as unknown as LLMClient;
+  }
+
+  it("invokes the LLM cluster-merge path when RECALLNEST_LLM_CONSOLIDATION=true (#3)", async () => {
+    const prev = process.env.RECALLNEST_LLM_CONSOLIDATION;
+    process.env.RECALLNEST_LLM_CONSOLIDATION = "true";
+    try {
+      let synthCalls = 0;
+      const result = await runDream({
+        store: createMockStore(makeClusterableEntries()),
+        llm: makeConsolidationLLM(() => { synthCalls++; }),
+        embedder: createMockEmbedder(),
+        scope: "project:test",
+        force: true,
+      });
+      expect(result.ran).toBe(true);
+      expect(synthCalls).toBeGreaterThan(0);
+    } finally {
+      if (prev === undefined) delete process.env.RECALLNEST_LLM_CONSOLIDATION;
+      else process.env.RECALLNEST_LLM_CONSOLIDATION = prev;
+    }
+  });
+
+  it("does NOT invoke the LLM cluster-merge path when the flag is off (#3)", async () => {
+    const prev = process.env.RECALLNEST_LLM_CONSOLIDATION;
+    delete process.env.RECALLNEST_LLM_CONSOLIDATION;
+    try {
+      let synthCalls = 0;
+      const result = await runDream({
+        store: createMockStore(makeClusterableEntries()),
+        llm: makeConsolidationLLM(() => { synthCalls++; }),
+        embedder: createMockEmbedder(),
+        scope: "project:test",
+        force: true,
+      });
+      expect(result.ran).toBe(true);
+      expect(synthCalls).toBe(0);
+    } finally {
+      if (prev !== undefined) process.env.RECALLNEST_LLM_CONSOLIDATION = prev;
+    }
+  });
 });
 
 describe("runDream rebalance phase", () => {
