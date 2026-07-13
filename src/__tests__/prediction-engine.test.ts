@@ -231,7 +231,15 @@ describe("collectSignals", () => {
       const topicSignals = signals.filter(s => s.type === "uncovered_topic");
       expect(topicSignals.length).toBe(2);
       expect(topicSignals[0].trigger).toBe("kubernetes");
-      expect(topicSignals[0].weight).toBe(0.65);
+    });
+
+    it("surfaces a genuine uncovered topic above the confidence threshold", () => {
+      // End-to-end: an uncovered topic must clear scorePredictions' threshold,
+      // otherwise the whole signal type is dead (emitted weight * typeWeight
+      // must be >= CONFIDENCE_THRESHOLD).
+      const signals = collectSignals(emptyContext({ uncoveredTopics: ["kubernetes"] }));
+      const predictions = scorePredictions(signals);
+      expect(predictions.some(p => p.trigger === "kubernetes")).toBe(true);
     });
   });
 
