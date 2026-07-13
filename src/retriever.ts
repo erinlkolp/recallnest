@@ -1849,7 +1849,7 @@ export class MemoryRetriever {
     }
 
     // Evolution chain expansion — walk supersedes/supersededBy links
-    if (this.store.getById) {
+    if (typeof this.store.getById === "function") {
       const store = this.store;
       deps.expandViaEvolution = async (results) => {
         const expanded: RetrievalResult[] = [];
@@ -1870,7 +1870,7 @@ export class MemoryRetriever {
     }
 
     // Cluster member expansion — get sourceMemories from cluster insights
-    if (this.store.getById) {
+    if (typeof this.store.getById === "function") {
       const store = this.store;
       deps.expandViaClusters = async (results) => {
         const expanded: RetrievalResult[] = [];

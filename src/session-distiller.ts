@@ -261,7 +261,7 @@ function trackDisposition(result: PersistResult, stored: StoredMemoryRecord): vo
 
 export async function distillSession(
   messages: ConversationMessage[],
-  deps: PersistDeps & { llm: LLMClient },
+  deps: PersistDeps & { llm: LLMClient | null },
   opts: {
     scope?: string;
     preserveRecent?: number;
@@ -282,7 +282,9 @@ export async function distillSession(
   const preserveRecent = opts.preserveRecent ?? 6;
   const cutoff = Math.max(0, compacted.length - preserveRecent);
   const oldMessages = compacted.slice(0, cutoff);
-  const summaryResult = oldMessages.length > 0
+  // Summary needs an LLM; without one (or with nothing old to summarize) the
+  // microcompact layer still runs and returns an empty summary.
+  const summaryResult = oldMessages.length > 0 && deps.llm
     ? await summarizeSession(oldMessages, deps.llm)
     : { text: "", dimensions: {} };
 

@@ -14,7 +14,7 @@
  * Control: RECALLNEST_MCP_TIER=core|advanced|full
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ============================================================================
 // Tier Configuration
@@ -84,7 +84,7 @@ function shouldRegisterTool(toolName: string): boolean {
 }
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { autoRegisterBabelMemory } from "./language-hook.js";
-import { z } from "zod";
+import { z, type ZodRawShape } from "zod";
 import type { RetrievalResult } from "./retriever.js";
 import type { MemoryStore } from "./store.js";
 import { distillResults, formatExplainResults, formatSearchResults, formatBriefResults, formatFullResults, selectBriefSeedResults, summarizeResults } from "./memory-output.js";
@@ -188,13 +188,19 @@ const server = new McpServer({
 // Tool Registration Helper (tier-aware)
 // ============================================================================
 
-type ToolSchema = Parameters<typeof server.tool>[2];
-type ToolHandler = Parameters<typeof server.tool>[3];
-
 /** Map of all registered tool names to their descriptions (populated during registration). */
 const TOOL_DESCRIPTIONS = new Map<string, string>();
 
-function registerTool(name: string, description: string, schema: ToolSchema, handler: ToolHandler): void {
+// Generic over the tool's zod input shape so each handler's args are inferred
+// from its own schema. (The previous `Parameters<typeof server.tool>[2|3]`
+// aliases resolved against the wrong overload of the overloaded `server.tool`,
+// typing the schema as ToolAnnotations and the handler args as `any`.)
+function registerTool<Args extends ZodRawShape>(
+  name: string,
+  description: string,
+  schema: Args,
+  handler: ToolCallback<Args>,
+): void {
   if (!shouldRegisterTool(name)) {
     // stdout is reserved for MCP JSON-RPC on stdio transports.
     console.error(`[MCP] Skipping ${name} (tier: ${TOOL_TIERS[name]})`);
@@ -1892,27 +1898,22 @@ registerTool(
     const { distillSession } = await import("./session-distiller.js");
 
     const result = await distillSession(
-      { messages, scope, preserveRecent, keepRecentTools, persist },
-      {
-        llm,
-        persistMemory: async (input) => {
-          const stored = await persistMemory({
-            store, embedder, conflictStore, kgExtractor,
-          }, input);
-          return { disposition: stored.disposition, id: stored.id };
-        },
-      },
+      // Tool schema permits structured content items; the distiller consumes the
+      // string form. Cast at this boundary rather than narrowing the tool schema.
+      messages as unknown as Parameters<typeof distillSession>[0],
+      { store, embedder, conflictStore, kgExtractor, llm },
+      { scope, preserveRecent, keepRecentTools, persist },
     );
 
     const lines = [
-      `Microcompact: ${result.microcompact.toolsCleared} tool results cleared, ~${result.microcompact.tokensFreed} tokens freed`,
+      `Microcompact: ${result.microcompact.tools_cleared} tool results cleared, ~${result.microcompact.tokens_freed} tokens freed`,
     ];
     if (result.summary) {
       lines.push(`Summary: 9-dimension structured summary generated`);
     }
     if (result.persisted) {
       const p = result.persisted;
-      lines.push(`Persisted: ${p.memoriesStored} stored, ${p.memoriesDeduped} deduped, ${p.memoriesConflicted} conflicted, ${p.memoriesRejected} rejected`);
+      lines.push(`Persisted: ${p.memories_stored} stored, ${p.memories_deduped} deduped, ${p.memories_conflicted} conflicted`);
     }
 
     return {

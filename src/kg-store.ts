@@ -104,7 +104,7 @@ export class KGStore {
       };
 
       try {
-        table = await db.createTable(KG_TABLE_NAME, [schemaEntry]);
+        table = await db.createTable(KG_TABLE_NAME, [schemaEntry] as unknown as Record<string, unknown>[]);
         await table.delete('id = "__schema__"');
       } catch (createErr) {
         if (String(createErr).includes("already exists")) {
@@ -153,7 +153,7 @@ export class KGStore {
     } catch {
       // OK if not found
     }
-    await this.table!.add([full]);
+    await this.table!.add([full] as unknown as Record<string, unknown>[]);
     return full;
   }
 
@@ -183,7 +183,7 @@ export class KGStore {
     } catch {
       // OK if none found
     }
-    await this.table!.add(deduped);
+    await this.table!.add(deduped as unknown as Record<string, unknown>[]);
     return deduped;
   }
 

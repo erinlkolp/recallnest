@@ -50,6 +50,7 @@ export function buildManagedResumeObservation(
       response.responseMode === "recall-only" ? "recall-only" : "startup-recovery",
     ]),
     tools: ["resume_context"],
+    recordedAt: new Date().toISOString(),
   };
 }
 
@@ -79,5 +80,6 @@ export function buildManagedCheckpointObservation(
       corrected ? "sanitized" : "handoff-saved",
     ]),
     tools: ["checkpoint_session"],
+    recordedAt: new Date().toISOString(),
   };
 }

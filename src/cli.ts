@@ -40,7 +40,7 @@ import {
   WorkflowPatternInputSchema,
   type WorkflowPatternInput,
 } from "./memory-schema.js";
-import { classifyLegacyScope, type MemoryEntry } from "./store.js";
+import { classifyLegacyScope, type MemoryEntry, type MemoryStore } from "./store.js";
 import { ConflictStatusSchema } from "./conflict-schema.js";
 import { resolveConflictCandidate } from "./conflict-engine.js";
 import { escalateConflicts } from "./conflict-escalation.js";
@@ -254,7 +254,7 @@ function defaultConflictAuditExportPath(format: "md" | "json", canonicalKey?: st
   return join(getExportsDir(), `${timestamp}-${stem}.${format}`);
 }
 
-function parseConflictStatusOption(value?: string): "open" | "accepted-incoming" | "kept-existing" | undefined {
+function parseConflictStatusOption(value?: string): "open" | "accepted-incoming" | "kept-existing" | "merged" | undefined {
   if (!value) return undefined;
   const parsed = ConflictStatusSchema.safeParse(value);
   if (!parsed.success) {

@@ -338,6 +338,7 @@ export function buildContinuityEvalObservationInput(
       report.passed ? "pass" : "fail",
     ],
     tools: ["resume_context"],
+    recordedAt: new Date().toISOString(),
   };
 }
 
