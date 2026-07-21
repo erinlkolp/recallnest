@@ -45,7 +45,7 @@
     "commander": "^15.0.0",
     "openai": "^6.48.0",
     "tsx": "^4.19.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "babel-memory": ">=1.0.0"
