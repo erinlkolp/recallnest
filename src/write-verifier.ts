@@ -31,6 +31,7 @@ export type VerificationIssue =
   | "missing_vector"
   | "missing_scope"
   | "missing_importance"
+  | "corrupt_metadata"
   | "empty_text";
 
 export interface VerificationResult {
@@ -107,19 +108,25 @@ function checkEntry(entry: MemoryEntry | null, id: string): VerificationIssue[] 
     issues.push("empty_text");
   }
 
-  // Metadata should contain scope
+  // Scope and importance are persisted as top-level columns (see store.get),
+  // NOT inside the metadata JSON blob — buildStructuredMetadata never emits
+  // them. Validating the metadata blob would flag every healthy write and mask
+  // real failures, so check the actual columns.
+  if (!entry.scope || entry.scope.trim().length === 0) {
+    issues.push("missing_scope");
+  }
+  if (typeof entry.importance !== "number" || !Number.isFinite(entry.importance)) {
+    issues.push("missing_importance");
+  }
+
+  // Metadata, when present, must still be parseable JSON — downstream code
+  // parses it, so corrupt metadata is a genuine integrity failure.
   if (entry.metadata) {
     try {
-      const meta = JSON.parse(entry.metadata);
-      if (!meta.scope) issues.push("missing_scope");
-      if (typeof meta.importance !== "number") issues.push("missing_importance");
+      JSON.parse(entry.metadata);
     } catch {
-      issues.push("missing_scope");
-      issues.push("missing_importance");
+      issues.push("corrupt_metadata");
     }
-  } else {
-    issues.push("missing_scope");
-    issues.push("missing_importance");
   }
 
   return issues;

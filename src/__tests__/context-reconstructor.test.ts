@@ -4,6 +4,7 @@ import {
   extractCitedIds,
   removeSentencesWithId,
   computeCoverage,
+  computeSourceMapCoverage,
 } from "../context-reconstructor.js";
 
 describe("reconstruction gate", () => {
@@ -61,5 +62,35 @@ describe("computeCoverage", () => {
     const cov = computeCoverage("User likes TypeScript. Weather is sunny today.", ["User likes TypeScript", "User uses Bun"]);
     expect(cov).toBeGreaterThan(0.3);
     expect(cov).toBeLessThan(0.9);
+  });
+});
+
+describe("CJK sentence handling", () => {
+  test("preserves valid CJK sentences when one citation is hallucinated", () => {
+    // No inter-sentence whitespace; fullwidth 。 terminators. The old ASCII
+    // splitter collapsed this into one sentence, so removing the bad citation
+    // dropped the whole reconstruction.
+    const text =
+      "これはDockerの設定です[src:mem-1]。次にKubernetesを構成しました[src:bad-9]。最後にテストしました[src:mem-2]。";
+    const cleaned = removeSentencesWithId(text, "bad-9");
+    expect(cleaned).toContain("[src:mem-1]");
+    expect(cleaned).toContain("[src:mem-2]");
+    expect(cleaned).not.toContain("[src:bad-9]");
+  });
+
+  test("computes per-sentence coverage for CJK (not all-or-nothing)", () => {
+    const text = "根拠あり[src:mem-1]。根拠なしの主張です。";
+    const cov = computeSourceMapCoverage(text, new Set(["mem-1"]));
+    // Old behavior: whole text is one sentence -> coverage 1.0.
+    expect(cov).toBeCloseTo(0.5);
+  });
+
+  test("English splitting is unaffected (decimals not over-split)", () => {
+    // The ASCII branch still requires whitespace after .!?, so "3.14" stays whole.
+    const text = "Version is 3.14 now [src:a]. Bad claim [src:bad].";
+    const cleaned = removeSentencesWithId(text, "bad");
+    expect(cleaned).toContain("3.14");
+    expect(cleaned).toContain("[src:a]");
+    expect(cleaned).not.toContain("[src:bad]");
   });
 });

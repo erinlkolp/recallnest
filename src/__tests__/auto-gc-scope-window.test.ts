@@ -42,8 +42,11 @@ function makeFaithfulStore(entries: MemoryEntry[]) {
   const data = [...entries];
   const listCalls: Array<{ scopeFilter?: string[]; order?: string }> = [];
   const store = {
-    async stats() {
-      return { totalCount: data.length, scopeCounts: {}, categoryCounts: {} };
+    async stats(scopeFilter?: string[]) {
+      const rows = scopeFilter
+        ? data.filter((e) => scopeFilter.includes(e.scope ?? ""))
+        : data;
+      return { totalCount: rows.length, scopeCounts: {}, categoryCounts: {} };
     },
     async list(
       scopeFilter?: string[],
@@ -133,5 +136,64 @@ describe("maybeRunGc — bug #4: scan window direction", () => {
     expect(listCalls[0]?.order).toBe("asc");
     expect(result.totalChecked).toBe(3); // window honored
     expect(result.archivedCount).toBe(2); // both old ones found & archived
+  });
+});
+
+describe("maybeRunGc — scope gate: trigger uses per-scope count, not global", () => {
+  beforeEach(() => resetGcTimestamp());
+
+  it("does not trigger a scoped GC when only the global count crosses minMemoryCount", async () => {
+    // Small target scope (5) below threshold; a large sibling scope (30) pushes
+    // the store-wide count over minMemoryCount. A scoped run must gate on its
+    // own scope's count, not the global total.
+    const entries: MemoryEntry[] = [];
+    for (let i = 0; i < 5; i++) entries.push(makeEntry({ id: `a-${i}`, scope: "project:A", ageDays: 90 }));
+    for (let i = 0; i < 30; i++) entries.push(makeEntry({ id: `b-${i}`, scope: "project:B", ageDays: 90 }));
+
+    const { store } = makeFaithfulStore(entries);
+    const config = {
+      ...DEFAULT_AUTO_GC_CONFIG,
+      minMemoryCount: 10, // A(5) below, A+B(35) above
+      minHoursSinceLastGc: 0,
+      decayScoreThreshold: 2.0,
+      minAgeDays: 30,
+    };
+
+    const result = await maybeRunGc(store, config, undefined, undefined, "project:A");
+
+    // Before the fix, store.stats() returned the global 35 → GC triggered.
+    expect(result.triggered).toBe(false);
+    expect(result.reason).toBe("below_memory_threshold");
+  });
+});
+
+describe("maybeRunGc — scope gate: per-scope min-hours cooldown", () => {
+  beforeEach(() => resetGcTimestamp());
+
+  it("does not let one scope's run starve another within the cooldown window", async () => {
+    const entries: MemoryEntry[] = [];
+    for (let i = 0; i < 5; i++) entries.push(makeEntry({ id: `a-${i}`, scope: "project:A", ageDays: 90 }));
+    for (let i = 0; i < 5; i++) entries.push(makeEntry({ id: `b-${i}`, scope: "project:B", ageDays: 90 }));
+
+    const { store } = makeFaithfulStore(entries);
+    const config = {
+      ...DEFAULT_AUTO_GC_CONFIG,
+      minMemoryCount: 1,
+      minHoursSinceLastGc: 24, // real cooldown — a shared global clock would block B
+      decayScoreThreshold: 2.0,
+      minAgeDays: 30,
+    };
+
+    const resultA = await maybeRunGc(store, config, undefined, undefined, "project:A");
+    const resultB = await maybeRunGc(store, config, undefined, undefined, "project:B");
+
+    expect(resultA.triggered).toBe(true);
+    // Before the fix, a module-global timestamp made B return "too_soon".
+    expect(resultB.triggered).toBe(true);
+
+    // A second run for A within the window IS correctly gated.
+    const resultA2 = await maybeRunGc(store, config, undefined, undefined, "project:A");
+    expect(resultA2.triggered).toBe(false);
+    expect(resultA2.reason).toBe("too_soon");
   });
 });
