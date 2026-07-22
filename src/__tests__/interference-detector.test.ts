@@ -147,6 +147,19 @@ describe("F2: Enhanced RIF with cluster top-K", () => {
     expect(filtered[0].entry.id).toBe("a");
   });
 
+  test("score-ratio-demoted result is moved to the end, not dropped", () => {
+    const v = unitVec([1, 0, 0, 0]);
+    const results = [
+      makeRetrievalResult("a", v, 0.9),
+      makeRetrievalResult("b", v, 0.85),
+      makeRetrievalResult("c", v, 0.5), // < 0.9 * 0.80 → demoted by score ratio
+    ];
+    const filtered = filterInterference(results, 0.85, 0.80, 3);
+    // c is a near-duplicate far below the ratio: it should be demoted to the
+    // tail as fallback, never silently removed from the result set.
+    expect(filtered.map(r => r.entry.id)).toEqual(["a", "b", "c"]);
+  });
+
   test("4th cluster member gets 50% score demotion", () => {
     const v = unitVec([1, 0, 0, 0]);
     const results = [
