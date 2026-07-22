@@ -746,7 +746,10 @@ export class MemoryRetriever {
     // run focused follow-up queries, merge to improve cross-session coverage.
     const useMultiHop = context.multiHop ?? this.config.multiHop ?? false;
     if (useMultiHop && results.length > 0) {
-      results = await this.multiHopExpand(results, context);
+      // Preserve the over-fetch pool: when a topicTag filter is pending, the
+      // pool must stay at fetchLimit through multi-hop so tagged matches ranked
+      // below safeLimit survive until the tag filter (and final cap) below.
+      results = await this.multiHopExpand(results, context, fetchLimit);
     }
 
     // MP-1: Topic Tag post-filter — only keep results matching the requested topicTag
@@ -849,6 +852,7 @@ export class MemoryRetriever {
   private async multiHopExpand(
     firstPass: RetrievalResult[],
     context: RetrievalContext,
+    poolLimit: number = context.limit,
   ): Promise<RetrievalResult[]> {
     const maxQueries = this.config.multiHopMaxQueries ?? 3;
     const entities = extractEntitiesFromResults(firstPass);
@@ -866,7 +870,7 @@ export class MemoryRetriever {
     const followUpPromises = novelEntities.map(entity =>
       this.hybridRetrieval(
         `${entity} ${context.query}`,
-        context.limit,
+        poolLimit,
         context.scopeFilter,
         context.category,
         context.includeArchived,
@@ -890,10 +894,13 @@ export class MemoryRetriever {
       }
     }
 
-    // Sort by score descending, limit
+    // Sort by score descending, then cap to the pool limit. When a topicTag
+    // filter is pending, poolLimit is the over-fetch size (fetchLimit), so the
+    // enlarged pool survives until the downstream tag filter + final cap; when
+    // no filter follows, poolLimit is the requested limit.
     return [...merged.values()]
       .sort((a, b) => b.score - a.score)
-      .slice(0, context.limit);
+      .slice(0, poolLimit);
   }
 
   private async vectorOnlyRetrieval(
