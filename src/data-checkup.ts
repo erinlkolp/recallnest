@@ -36,17 +36,21 @@ export interface CheckupReport {
 // Individual checks
 // ---------------------------------------------------------------------------
 
-/** Check 1: All vectors should have the same dimension. */
-function checkVectorDimensions(entries: MemoryEntry[]): CheckResult {
-  const dims = new Map<number, number>(); // dim → count
-  for (const e of entries) {
-    const d = e.vector?.length ?? 0;
-    dims.set(d, (dims.get(d) ?? 0) + 1);
-  }
+/**
+ * Check 1: All vectors should have the same dimension.
+ *
+ * Takes a dimension histogram (dimension -> count) sourced directly from the
+ * vector column via store.vectorDimensionCounts(). It must NOT derive
+ * dimensions from list() entries: list() strips vectors (vector: []) for
+ * performance, so every entry would read as dimension 0 and the check would
+ * silently pass regardless of real corruption.
+ */
+function checkVectorDimensions(dims: Map<number, number>): CheckResult {
+  const total = [...dims.values()].reduce((sum, c) => sum + c, 0);
 
   if (dims.size <= 1) {
     const dim = dims.keys().next().value ?? 0;
-    return { name: "vector_dimensions", status: "ok", detail: `All ${entries.length} entries have dimension ${dim}` };
+    return { name: "vector_dimensions", status: "ok", detail: `All ${total} entries have dimension ${dim}` };
   }
 
   const sorted = [...dims.entries()].sort((a, b) => b[1] - a[1]);
@@ -190,16 +194,19 @@ function checkInterferenceDensity(entries: MemoryEntry[]): CheckResult {
 // ---------------------------------------------------------------------------
 
 export interface CheckupDeps {
-  store: Pick<MemoryStore, "list" | "stats">;
+  store: Pick<MemoryStore, "list" | "stats" | "vectorDimensionCounts">;
   openConflictCount: number;
 }
 
 export async function runDataCheckup(deps: CheckupDeps): Promise<CheckupReport> {
   const entries = await deps.store.list(undefined, undefined, 10000, 0);
+  // Vector dimensions come straight from the vector column — list() strips
+  // vectors, so it cannot be used to check dimension consistency.
+  const dimCounts = await deps.store.vectorDimensionCounts(10000);
 
   return {
     checks: [
-      checkVectorDimensions(entries),
+      checkVectorDimensions(dimCounts),
       checkOrphanMemories(entries),
       checkTierDistribution(entries),
       checkConflictBacklog(deps.openConflictCount),

@@ -862,6 +862,29 @@ export class MemoryStore {
     return result;
   }
 
+  /**
+   * Histogram of vector dimensions (dimension -> entry count) read straight
+   * from the vector column. Used by data-checkup: `list()` intentionally strips
+   * vectors for performance, so the dimension-consistency check must source the
+   * real dimensions here rather than from list() rows (which would all read 0).
+   */
+  async vectorDimensionCounts(limit = 10000): Promise<Map<number, number>> {
+    await this.ensureInitialized();
+    const rows = await this.table!.query()
+      .select(["vector"])
+      .limit(limit)
+      .toArray();
+
+    const counts = new Map<number, number>();
+    for (const row of rows) {
+      const dim = Array.isArray(row.vector)
+        ? row.vector.length
+        : (row.vector as ArrayLike<number> | null | undefined)?.length ?? 0;
+      counts.set(dim, (counts.get(dim) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   async stats(scopeFilter?: string[]): Promise<{
     totalCount: number;
     scopeCounts: Record<string, number>;

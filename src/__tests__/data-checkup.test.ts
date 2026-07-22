@@ -32,13 +32,23 @@ function makeEntry(overrides: Partial<MemoryEntry> & { id: string }): MemoryEntr
   };
 }
 
-function createMockStore(entries: MemoryEntry[]): Pick<MemoryStore, "list" | "stats"> {
+function createMockStore(entries: MemoryEntry[]): Pick<MemoryStore, "list" | "stats" | "vectorDimensionCounts"> {
   return {
     async list() { return entries; },
     async stats() {
       return { totalCount: entries.length, scopeCounts: {}, categoryCounts: {} };
     },
-  } as Pick<MemoryStore, "list" | "stats">;
+    // Mirrors the real store: dimensions are read from the vector column, not
+    // from list() rows (which strip vectors).
+    async vectorDimensionCounts() {
+      const counts = new Map<number, number>();
+      for (const e of entries) {
+        const dim = e.vector?.length ?? 0;
+        counts.set(dim, (counts.get(dim) ?? 0) + 1);
+      }
+      return counts;
+    },
+  } as Pick<MemoryStore, "list" | "stats" | "vectorDimensionCounts">;
 }
 
 // ---------------------------------------------------------------------------

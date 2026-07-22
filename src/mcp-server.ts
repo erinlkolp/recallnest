@@ -111,6 +111,7 @@ import { resolveConflictCandidate } from "./conflict-engine.js";
 import { escalateConflicts } from "./conflict-escalation.js";
 import { ConflictCandidateStore } from "./conflict-store.js";
 import { runDataCheckup, formatCheckupReport } from "./data-checkup.js";
+import { drillDownMemory } from "./drill-down.js";
 import { runMemoryLint, formatMemoryLintReport } from "./memory-lint.js";
 import { exportMemoryGraph, formatGraphExportResult } from "./graph-export.js";
 import { runDream, formatDreamResult } from "./dream-pipeline.js";
@@ -1600,42 +1601,9 @@ registerTool(
   },
   async ({ id, level }) => {
     try {
-      const entry = await store.getById(id);
-      if (!entry) {
-        return {
-          content: [{ type: "text" as const, text: `No memory found with ID: ${id}` }],
-        };
-      }
-
-      // Parse metadata for L0/L1/L2 content
-      let meta: Record<string, unknown> = {};
-      try {
-        meta = JSON.parse(entry.metadata || "{}");
-      } catch { /* malformed metadata, use raw text */ }
-
-      // Support both legacy short names (l0/l1) and current long names (l0_abstract/l1_overview/l2_content)
-      const l0 = typeof meta.l0_abstract === "string" ? meta.l0_abstract : typeof meta.l0 === "string" ? meta.l0 : null;
-      const l1 = typeof meta.l1_overview === "string" ? meta.l1_overview : typeof meta.l1 === "string" ? meta.l1 : null;
-      const l2 = typeof meta.l2_content === "string" ? meta.l2_content : entry.text;
-
-      let content: string;
-      if (level === "overview" && l1) {
-        content = `## ${entry.category} (L1 Overview)\n\n${l1}`;
-      } else {
-        content = `## ${entry.category} (Full Content)\n\n${l2}`;
-      }
-
-      const header = [
-        `**ID**: ${entry.id}`,
-        `**Category**: ${entry.category}`,
-        `**Scope**: ${entry.scope}`,
-        `**Importance**: ${entry.importance}`,
-        `**Created**: ${new Date(entry.timestamp).toISOString()}`,
-        l0 ? `**Abstract**: ${l0}` : null,
-      ].filter(Boolean).join("\n");
-
+      const text = await drillDownMemory(store, id, level);
       return {
-        content: [{ type: "text" as const, text: `${header}\n\n${content}` }],
+        content: [{ type: "text" as const, text }],
       };
     } catch (err) {
       return {
