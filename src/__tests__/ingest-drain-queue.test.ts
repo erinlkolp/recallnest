@@ -66,6 +66,37 @@ describe("drainPendingQueue failure handling", () => {
     expect(remaining[0].scope).toBe("cc:failme");
   });
 
+  it("stores the raw queued text (not the extracted summary) as entry text and l2_content", async () => {
+    // A single long sentence (no internal '.'/'。') so the heuristic L0 summary
+    // is a 150-char slice that provably differs from the full raw chunk.
+    const rawText =
+      "alpha durable memory content that is deliberately much longer than one hundred and fifty characters " +
+      "so the heuristic fallback summary is a truncated slice which must never replace the original raw text";
+    expect(rawText.length).toBeGreaterThan(150);
+
+    writeFileSync(PENDING_EXTRACTION_FILE, JSON.stringify([
+      { text: rawText, scope: "cc:ok1", queuedAt: "2024-01-01T00:00:00Z" },
+    ]));
+
+    const stored: Array<{ text: string; metadata: string }> = [];
+    const store = {
+      async store(entry: { text: string; metadata: string }) {
+        stored.push(entry);
+        return {} as never;
+      },
+    } as unknown as MemoryStore;
+
+    const result = await drainPendingQueue(store, orthogonalEmbedder, throwingLlm);
+
+    expect(result.processed).toBe(1);
+    expect(stored).toHaveLength(1);
+    // entry.text must be the raw queued chunk, not the L1/L0 summary.
+    expect(stored[0].text).toBe(rawText);
+    // The L2 (full content) tier must also hold the raw text, not the summary.
+    const meta = JSON.parse(stored[0].metadata);
+    expect(meta.l2_content).toBe(rawText);
+  });
+
   it("empties the queue when every item stores successfully", async () => {
     writeFileSync(PENDING_EXTRACTION_FILE, JSON.stringify([
       { text: "alpha durable memory content", scope: "cc:ok1", queuedAt: "2024-01-01T00:00:00Z" },
