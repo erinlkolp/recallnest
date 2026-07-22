@@ -94,18 +94,26 @@ export class EntityResolver {
 
   /** Resolve all recognizable entities in a text string. Returns text with aliases replaced. */
   resolveText(text: string): string {
-    let result = text;
-    // Sort aliases by length descending to match longer aliases first
-    const sorted = [...this.aliases.entries()].sort((a, b) => b[0].length - a[0].length);
-    for (const [alias, canonical] of sorted) {
-      if (alias === canonical) continue; // skip identity mappings
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Always use word boundary to prevent matching inside other words
-      // (e.g. "pt" inside "typescript")
-      const re = new RegExp(`\\b${escaped}\\b`, "gi");
-      result = result.replace(re, canonical);
-    }
-    return result;
+    if (this.aliases.size === 0) return text;
+    // Single-pass replace via one combined alternation. Sequential per-alias
+    // replaces re-scan already-produced canonical text, so a canonical that
+    // embeds a shorter alias (e.g. "claude"→"anthropic claude") gets rewritten
+    // again, cascading into duplicated tokens ("anthropic anthropic claude").
+    // A single pass maps each match to its own canonical exactly once.
+    //
+    // Identity mappings ARE included in the alternation so that a longer alias
+    // (e.g. "claude code") matches and consumes its span before a shorter one
+    // ("claude") can rewrite the prefix. Alternatives are sorted longest-first
+    // because JS regex alternation is order-sensitive (first match at a position
+    // wins), giving us leftmost-longest behavior.
+    const aliases = [...this.aliases.keys()].sort((a, b) => b.length - a.length);
+    const alternation = aliases
+      .map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    // Always use word boundaries to prevent matching inside other words
+    // (e.g. "pt" inside "typescript").
+    const re = new RegExp(`\\b(?:${alternation})\\b`, "gi");
+    return text.replace(re, (match) => this.aliases.get(match.toLowerCase()) ?? match);
   }
 
   /** Check if a term has a known alias. */
