@@ -1124,7 +1124,14 @@ export class MemoryRetriever {
     const effectiveMinScore = isShortQuery(searchQuery)
       ? this.config.minScore * SHORT_QUERY_MIN_SCORE_FACTOR
       : this.config.minScore;
-    const filtered = anchorBoosted.filter(r => r.score >= effectiveMinScore);
+    // Re-sort by score after the multi-vector blend + anchor boost re-scored
+    // candidates: those stages .map() new scores without reordering, so the
+    // rerank-pool slice below (filtered.slice(0, limit * 2)) would otherwise
+    // truncate by the STALE fused order and drop boosted candidates that now
+    // belong in the pool.
+    const filtered = anchorBoosted
+      .filter(r => r.score >= effectiveMinScore)
+      .sort((a, b) => b.score - a.score);
     trace?.endStage(filtered.length, filtered.map(r => r.score));
 
     // Rerank if enabled
@@ -1569,7 +1576,12 @@ export class MemoryRetriever {
     // Fallback: lightweight cosine similarity rerank
     try {
       const reranked = results.map(result => {
-        const cosineScore = cosineSimilarity(queryVector, result.entry.vector);
+        // LanceDB returns Arrow Vector objects (iterable, have .length, but no
+        // numeric bracket indexing), so convert before cosineSimilarity — else
+        // b[i] is undefined → NaN → the fallback silently no-ops. Mirrors the
+        // Array.from workaround already used in applyMMRDiversity.
+        const resultVector = Array.from(result.entry.vector as Iterable<number>);
+        const cosineScore = cosineSimilarity(queryVector, resultVector);
         const combinedScore = (result.score * 0.7) + (cosineScore * 0.3);
 
         return {
