@@ -452,12 +452,33 @@ export class Embedder {
     try {
       const response = await this.createEmbedding(validTexts, task);
 
+      // The provider must return exactly one embedding per input. A short return
+      // would otherwise silently drop trailing chunks, and a positional zip of a
+      // partial/reordered response would misalign embeddings onto the wrong text
+      // (corrupting stored memory). Fail loud instead of degrading silently.
+      if (response.data.length !== validTexts.length) {
+        throw new Error(
+          `Embedding count mismatch: sent ${validTexts.length} inputs but provider returned ${response.data.length}`,
+        );
+      }
+
       // Create result array with proper length
       const results: number[][] = new Array(texts.length);
 
-      // Fill in embeddings for valid texts
+      // Fill in embeddings for valid texts. Map by the provider-supplied `index`
+      // when present (OpenAI-compatible responses carry it precisely so callers
+      // can detect out-of-order/partial responses); fall back to response
+      // position otherwise.
       response.data.forEach((item, idx) => {
-        const originalIndex = validIndices[idx];
+        const responseIdx = typeof (item as { index?: number }).index === "number"
+          ? (item as { index: number }).index
+          : idx;
+        const originalIndex = validIndices[responseIdx];
+        if (originalIndex === undefined) {
+          throw new Error(
+            `Embedding response index out of range: provider returned index ${responseIdx} for ${validTexts.length} inputs`,
+          );
+        }
         const embedding = item.embedding as number[];
 
         this.validateEmbedding(embedding);

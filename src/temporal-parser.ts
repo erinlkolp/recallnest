@@ -289,6 +289,32 @@ export function parseTemporalQuery(query: string): TemporalParseResult {
 }
 
 /**
+ * Resolve a user-supplied date-bound string (from search_memory's `after` /
+ * `before` params) to a Unix-ms timestamp.
+ *
+ * Accepts both absolute dates (ISO `YYYY-MM-DD`, or anything `new Date()` can
+ * parse) and the relative expressions the tool schema advertises
+ * (e.g. '最近30天', 'last 7 days'). Relative strings are routed through
+ * {@link parseTemporalQuery}; a plain `new Date('last 7 days')` yields an
+ * Invalid Date, so callers that relied on `new Date(str).getTime()` silently
+ * dropped these filters — this helper closes that gap.
+ *
+ * @param bound "start" → prefer the range start (for `after`);
+ *              "end"   → prefer the range end   (for `before`).
+ * @returns the resolved timestamp, or undefined if the string is unparseable.
+ */
+export function resolveDateBoundMs(input: string, bound: "start" | "end"): number | undefined {
+  if (!input) return undefined;
+  // Absolute date first (ISO or any Date-parseable string).
+  const absolute = new Date(input).getTime();
+  if (!Number.isNaN(absolute)) return absolute;
+  // Fall back to relative parsing.
+  const { constraint } = parseTemporalQuery(input);
+  if (!constraint) return undefined;
+  return bound === "start" ? constraint.startMs : constraint.endMs;
+}
+
+/**
  * Check if a timestamp falls within a temporal constraint.
  */
 export function matchesTemporalConstraint(timestampMs: number, constraint: TemporalConstraint): boolean {

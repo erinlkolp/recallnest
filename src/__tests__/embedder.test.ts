@@ -148,3 +148,58 @@ describe("Embedder chunking recursion guard", () => {
     expect(calls).toBeLessThan(20);
   }, 10_000);
 });
+
+describe("Embedder batch response integrity", () => {
+  it("throws instead of silently dropping chunks when the provider under-returns", async () => {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "text-embedding-3-small",
+      dimensions: 3,
+      chunking: false, // don't route the mismatch through the auto-chunk path
+    });
+
+    (embedder as any).client = {
+      embeddings: {
+        // Sent 3 inputs, provider returns only 2 embeddings (trailing drop).
+        create: async () => ({
+          data: [
+            { index: 0, embedding: [1, 1, 1] },
+            { index: 1, embedding: [2, 2, 2] },
+          ],
+        }),
+      },
+    };
+
+    await expect(embedder.embedBatchPassage(["aaa", "bbb", "ccc"])).rejects.toThrow(/count mismatch/i);
+  });
+
+  it("maps embeddings by the provider index, not response position (no misalignment)", async () => {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "text-embedding-3-small",
+      dimensions: 3,
+      chunking: false,
+    });
+
+    (embedder as any).client = {
+      embeddings: {
+        // Correct count but OUT OF ORDER; index field is authoritative.
+        create: async () => ({
+          data: [
+            { index: 2, embedding: [3, 3, 3] },
+            { index: 0, embedding: [1, 1, 1] },
+            { index: 1, embedding: [2, 2, 2] },
+          ],
+        }),
+      },
+    };
+
+    await expect(embedder.embedBatchPassage(["aaa", "bbb", "ccc"])).resolves.toEqual([
+      [1, 1, 1],
+      [2, 2, 2],
+      [3, 3, 3],
+    ]);
+  });
+});

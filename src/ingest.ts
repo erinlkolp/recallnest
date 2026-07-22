@@ -628,8 +628,10 @@ export async function drainPendingQueue(
     const batch = pending.slice(i, i + 20);
     const texts = batch.map(c => c.text);
     const extractions = await smartExtractBatch(texts, llm);
-    const embeddingTexts = extractions.map(e => e.l1 || e.l0);
-    const vectors = await embedder.embedBatchPassage(embeddingTexts);
+    // Embed the raw chunk text (matching the non-deferred ingest path), not the
+    // L1/L0 summary — otherwise these entries' vectors diverge from every
+    // normally-ingested entry and semantic recall for them is inconsistent.
+    const vectors = await embedder.embedBatchPassage(texts);
 
     // Batch-internal dedup: drop near-duplicate candidates before storing
     const keepIndices = batchInternalDedup(
@@ -639,16 +641,20 @@ export async function drainPendingQueue(
 
     for (const j of keepIndices) {
       try {
-        const entryText = extractions[j].l1 || extractions[j].l0;
-        const language = detectLang(entryText);
-        const fts_text = tokenizeFts(entryText, language);
+        // Store the raw queued chunk as the entry text and the L2 (full
+        // content) tier. The L1/L0 summaries stay in metadata only. Using the
+        // summary as entry.text/l2_content permanently loses the original
+        // content (drill-down/L2 expansion would only ever return a summary).
+        const rawText = batch[j].text;
+        const language = detectLang(rawText);
+        const fts_text = tokenizeFts(rawText, language);
         await store.store({
-          text: entryText,
+          text: rawText,
           vector: vectors[j],
           category: extractions[j].category as any,
           scope: batch[j].scope,
           importance: extractions[j].importance,
-          metadata: JSON.stringify({ source: batch[j].scope.split(":")[0], l0_abstract: extractions[j].l0, l1_overview: extractions[j].l1, l2_content: extractions[j].l1 || extractions[j].l0 }),
+          metadata: JSON.stringify({ source: batch[j].scope.split(":")[0], l0_abstract: extractions[j].l0, l1_overview: extractions[j].l1, l2_content: rawText }),
           language,
           fts_text,
         });
