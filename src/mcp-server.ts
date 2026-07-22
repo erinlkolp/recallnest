@@ -123,7 +123,7 @@ import { formatWorkflowEvidencePack, formatWorkflowHealthDashboard, formatWorkfl
 import { WorkflowObservationStore } from "./workflow-observation-store.js";
 import { buildManagedCheckpointObservation, buildManagedResumeObservation } from "./workflow-observation-managed.js";
 import { buildRetrievalContext, resolveScopeSelection, resolveReminderScopeFilter } from "./scope-policy.js";
-import { matchesTemporalConstraint, type TemporalConstraint } from "./temporal-parser.js";
+import { matchesTemporalConstraint, resolveDateBoundMs, type TemporalConstraint } from "./temporal-parser.js";
 import { setReminder, checkTriggers, fireReminder, formatReminders, suggestPredictedReminders, formatSuggestedReminders, acceptPredictedReminder, demotePredictedReminder } from "./prospective-memory.js";
 import type { PredictionContext } from "./prediction-engine.js";
 import { forgetMemory, forgetByScope } from "./forget-engine.js";
@@ -965,12 +965,15 @@ registerTool(
       operation: "search_memory",
     }));
 
-    // Explicit temporal filtering from after/before params
+    // Explicit temporal filtering from after/before params.
+    // Resolve both absolute (ISO YYYY-MM-DD) and relative ('最近30天',
+    // 'last 7 days') forms — a raw new Date(relative) is an Invalid Date, so
+    // relative filters were silently a no-op before resolveDateBoundMs.
     if (after || before) {
       const constraint: TemporalConstraint = {
         type: (after && before) ? "range" : (after ? "after" : "before"),
-        startMs: after ? new Date(after).getTime() || undefined : undefined,
-        endMs: before ? new Date(before).getTime() || undefined : undefined,
+        startMs: after ? resolveDateBoundMs(after, "start") : undefined,
+        endMs: before ? resolveDateBoundMs(before, "end") : undefined,
         anchor: `${after || ""}..${before || ""}`,
       };
       if (constraint.startMs || constraint.endMs) {
@@ -981,6 +984,13 @@ registerTool(
           r => matchesTemporalConstraint(r.entry.timestamp, constraint),
           limit,
         );
+      } else if (results.length > limit) {
+        // Defensive: the after/before branch over-fetched limit*3 above. If the
+        // date(s) were unparseable no constraint applies and the filter above
+        // is skipped — trim the over-fetch back to the requested limit so a bad
+        // date can never leak 3x the results. filterResultSet keeps any
+        // attached reconstruction intact.
+        results = filterResultSet(results as RetrievalResultSet, () => true, limit);
       }
     }
 

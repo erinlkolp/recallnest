@@ -3,6 +3,7 @@ import {
   parseTemporalQuery,
   matchesTemporalConstraint,
   temporalWhereClause,
+  resolveDateBoundMs,
   type TemporalConstraint,
 } from "../temporal-parser.js";
 
@@ -237,5 +238,46 @@ describe("temporalWhereClause", () => {
       anchor: "test",
     });
     expect(clause).toBeNull();
+  });
+});
+
+// ============================================================================
+// resolveDateBoundMs — used by search_memory after/before params
+// ============================================================================
+
+describe("resolveDateBoundMs", () => {
+  const DAY_MS = 86_400_000;
+
+  it("resolves an absolute ISO date (YYYY-MM-DD)", () => {
+    expect(resolveDateBoundMs("2023-06-15", "start")).toBe(new Date("2023-06-15").getTime());
+    expect(resolveDateBoundMs("2023-06-15", "end")).toBe(new Date("2023-06-15").getTime());
+  });
+
+  it("resolves a relative EN expression 'last 7 days' to a start bound (~7 days ago)", () => {
+    const before = Date.now() - 7 * DAY_MS;
+    const ms = resolveDateBoundMs("last 7 days", "start");
+    const after = Date.now() - 7 * DAY_MS;
+    expect(ms).toBeDefined();
+    // Should be roughly 7 days ago, not NaN/undefined (the pre-fix bug produced undefined)
+    expect(ms!).toBeGreaterThanOrEqual(before - DAY_MS);
+    expect(ms!).toBeLessThanOrEqual(after + DAY_MS);
+  });
+
+  it("resolves a relative ZH expression '最近30天' to a start bound (~30 days ago)", () => {
+    const approx = Date.now() - 30 * DAY_MS;
+    const ms = resolveDateBoundMs("最近30天", "start");
+    expect(ms).toBeDefined();
+    expect(Math.abs(ms! - approx)).toBeLessThanOrEqual(DAY_MS);
+  });
+
+  it("resolves the end bound of a relative range to ~now", () => {
+    const ms = resolveDateBoundMs("last 7 days", "end");
+    expect(ms).toBeDefined();
+    expect(Math.abs(ms! - Date.now())).toBeLessThanOrEqual(DAY_MS);
+  });
+
+  it("returns undefined for an unparseable string", () => {
+    expect(resolveDateBoundMs("not a real date", "start")).toBeUndefined();
+    expect(resolveDateBoundMs("", "end")).toBeUndefined();
   });
 });
