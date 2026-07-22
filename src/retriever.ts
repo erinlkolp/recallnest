@@ -1940,7 +1940,7 @@ export class MemoryRetriever {
     // Narrative sibling expansion — reuse existing expandNarrativeSiblings logic
     if (isNarrativeModeEnabled()) {
       deps.expandViaNarrative = async (results) => {
-        const expanded = await this.expandNarrativeSiblings(results);
+        const expanded = await this.expandNarrativeSiblings(results, context.scopeFilter);
         // Return only the new siblings (not in original results)
         const existingIds = new Set(results.map(r => r.entry.id));
         return expanded.filter(r => !existingIds.has(r.entry.id));
@@ -1958,7 +1958,10 @@ export class MemoryRetriever {
    * Siblings are added with a dampened score (70% of the triggering result)
    * and capped at 3 siblings per general event to avoid flooding.
    */
-  async expandNarrativeSiblings(results: RetrievalResult[]): Promise<RetrievalResult[]> {
+  async expandNarrativeSiblings(
+    results: RetrievalResult[],
+    scopeFilter?: string[],
+  ): Promise<RetrievalResult[]> {
     if (!isNarrativeModeEnabled() || results.length === 0) return results;
 
     // Collect unique generalEventIds from results
@@ -1981,7 +1984,9 @@ export class MemoryRetriever {
     const MAX_SIBLINGS_PER_EVENT = 3;
 
     try {
-      const allEntries = await this.store.list(undefined, undefined, 500, 0);
+      // Scope siblings to the same retrieval scope — a bare list() would pull
+      // narrative siblings sharing a generalEventId from every project/session.
+      const allEntries = await this.store.list(scopeFilter, undefined, 500, 0);
       for (const entry of allEntries) {
         if (existingIds.has(entry.id)) continue;
         const narrative = parseNarrative(entry.metadata);

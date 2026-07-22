@@ -118,6 +118,26 @@ export function resolveScopeSelection(options: ScopeSelectionOptions): ScopeSele
   );
 }
 
+/**
+ * Resolve the scope filter to use for reminder side-effects (checkTriggers /
+ * fireReminder) so they honor exactly the same scope / sessionId / allScopes /
+ * env resolution as the search that surfaced them. Passing only the raw `scope`
+ * arg let reminders read and mutate rows in every other scope whenever scoping
+ * came from a session id or env default.
+ */
+export function resolveReminderScopeFilter(
+  args: { scope?: string; sessionId?: string; allScopes?: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): string[] | undefined {
+  return resolveScopeSelection({
+    scope: args.scope,
+    sessionId: args.sessionId,
+    allScopes: args.allScopes,
+    operation: "search_memory reminders",
+    env,
+  }).scopeFilter;
+}
+
 export function buildRetrievalContext(
   base: Omit<RetrievalContext, "scopeFilter"> & {
     scope?: string;
