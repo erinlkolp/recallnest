@@ -637,8 +637,10 @@ export class MemoryStore {
     if (isFullId) {
       candidates = await this.table!.query().where(`id = '${id}'`).limit(1).toArray();
     } else {
-      // Prefix match: fetch candidates and filter in app layer
-      const all = await this.table!.query().select(["id", "scope"]).limit(1000).toArray();
+      // Prefix match: fetch candidates and filter in app layer. Scan the full
+      // table (matching get()/update()); a fixed row cap here silently breaks
+      // ambiguity detection and can delete the wrong row past the cap.
+      const all = await this.table!.query().select(["id", "scope"]).toArray();
       candidates = all.filter((r: any) => (r.id as string).startsWith(id));
       if (candidates.length > 1) {
         throw new Error(`Ambiguous prefix "${id}" matches ${candidates.length} memories. Use a longer prefix or full ID.`);

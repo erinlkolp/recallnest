@@ -122,7 +122,7 @@ import { buildWorkflowEvidence, buildWorkflowObservationRecord, inspectWorkflowD
 import { formatWorkflowEvidencePack, formatWorkflowHealthDashboard, formatWorkflowHealthReport, formatWorkflowObservationSaved } from "./workflow-observation-output.js";
 import { WorkflowObservationStore } from "./workflow-observation-store.js";
 import { buildManagedCheckpointObservation, buildManagedResumeObservation } from "./workflow-observation-managed.js";
-import { buildRetrievalContext, resolveScopeSelection } from "./scope-policy.js";
+import { buildRetrievalContext, resolveScopeSelection, resolveReminderScopeFilter } from "./scope-policy.js";
 import { matchesTemporalConstraint, type TemporalConstraint } from "./temporal-parser.js";
 import { setReminder, checkTriggers, fireReminder, formatReminders, suggestPredictedReminders, formatSuggestedReminders, acceptPredictedReminder, demotePredictedReminder } from "./prospective-memory.js";
 import type { PredictionContext } from "./prediction-engine.js";
@@ -996,9 +996,11 @@ registerTool(
       results.sort((a, b) => (idOrder.get(a.entry.id) ?? 999) - (idOrder.get(b.entry.id) ?? 999));
     }
 
-    // Tier 3.4: Check for triggered reminders alongside search results
+    // Tier 3.4: Check for triggered reminders alongside search results.
+    // Resolve reminder scope exactly like the search (honoring sessionId /
+    // allScopes / env) so reminders never match or mutate rows in other scopes.
     const { store, embedder } = getComponents();
-    const scopeFilter = scope ? [scope] : undefined;
+    const scopeFilter = resolveReminderScopeFilter({ scope, sessionId, allScopes });
     const triggered = await checkTriggers(store, embedder, query, scopeFilter);
     let reminderText = "";
     if (triggered.length > 0) {
@@ -1025,7 +1027,7 @@ registerTool(
           frequentMemories: [], // Populated by access tracker in future iteration
           uncoveredTopics: results.length === 0 && query ? [query] : [],
         };
-        const suggestions = await suggestPredictedReminders(store, embedder, predictionCtx, scope ?? "global");
+        const suggestions = await suggestPredictedReminders(store, embedder, predictionCtx, scopeFilter?.[0] ?? "global");
         suggestedText = formatSuggestedReminders(suggestions);
       } catch {
         // Prediction failure is non-critical — silently skip
