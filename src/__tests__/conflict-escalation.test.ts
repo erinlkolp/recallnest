@@ -93,6 +93,43 @@ describe("escalateConflicts", () => {
     expect(replaced).toHaveLength(0);
   });
 
+  it("keeps the most urgent conflict when the top cap is smaller than the eligible set", async () => {
+    // listRecent returns records newest-updatedAt-first. The genuinely most
+    // urgent conflict is the oldest-open one, which sorts LAST in that order.
+    // The top cap must be applied AFTER the priority sort, or the most urgent
+    // conflict is sliced off before ranking.
+    const oldestMostUrgent = createConflictRecord({
+      conflictId: "00000000-0000-0000-0000-000000000001",
+      createdAt: "2026-01-01T00:00:00.000Z", // ~75 days open → escalated, highest openAgeDays
+      updatedAt: "2026-03-01T00:00:00.000Z", // oldest update → sorts last in listRecent
+    });
+    const recentlyTouched = createConflictRecord({
+      conflictId: "00000000-0000-0000-0000-000000000002",
+      createdAt: "2026-03-08T00:00:00.000Z", // ~9 days open → escalated, lower openAgeDays
+      updatedAt: "2026-03-16T00:00:00.000Z", // newest update → sorts first in listRecent
+    });
+
+    const result = await escalateConflicts({
+      conflictStore: {
+        async listRecent() {
+          // Newest-updatedAt-first, mirroring the real store ordering.
+          return [recentlyTouched, oldestMostUrgent] as any;
+        },
+        async replace(record: any) {
+          return record;
+        },
+      } as any,
+    }, {
+      attention: "escalated",
+      limit: 100,
+      top: 1,
+      apply: false,
+    }, { now: new Date("2026-03-17T00:00:00.000Z") });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.conflictId).toBe("00000000-0000-0000-0000-000000000001");
+  });
+
   it("applies escalation metadata exactly once per attention bucket", async () => {
     const records = [
       createConflictRecord({

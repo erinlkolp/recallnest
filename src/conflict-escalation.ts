@@ -92,13 +92,17 @@ export async function escalateConflicts(
     limit: input.limit,
   });
 
-  const eligibleItems = sortEscalationItems(
+  // Rank by escalation priority BEFORE applying the `top` cap. listRecent
+  // returns records newest-updatedAt-first, so the most urgent (oldest-open)
+  // conflicts sort last; slicing before the priority sort would drop exactly
+  // those from the escalation set.
+  const rankedItems = sortEscalationItems(
     records
       .map((record) => buildConflictEscalationItem(record, now))
       .filter((item): item is ConflictEscalationResultItem => Boolean(item))
-      .filter((item) => !input.attention || item.attention === input.attention)
-      .slice(0, input.top),
+      .filter((item) => !input.attention || item.attention === input.attention),
   );
+  const eligibleItems = rankedItems.slice(0, input.top);
 
   const items: ConflictEscalationResultItem[] = [];
   let escalated = 0;

@@ -34,6 +34,19 @@ describe("EntityResolver", () => {
     expect(resolved).toContain("docker compose");
   });
 
+  it("resolveText does not cascade-duplicate when a canonical embeds another alias", () => {
+    // "anthropic" and "claude" both map to "anthropic claude". A naive
+    // sequential replace re-scans the produced canonical and duplicates tokens.
+    expect(defaultResolver.resolveText("anthropic")).toBe("anthropic claude");
+    expect(defaultResolver.resolveText("chatgpt")).toBe("openai gpt");
+  });
+
+  it("resolveText preserves a multi-word canonical without re-expanding its parts", () => {
+    // "claude code" is an identity alias; the shorter "claude" alias must not
+    // rewrite its prefix into "anthropic claude code".
+    expect(defaultResolver.resolveText("claude code")).toBe("claude code");
+  });
+
   it("hasAlias returns true for known aliases", () => {
     expect(defaultResolver.hasAlias("ts")).toBe(true);
     expect(defaultResolver.hasAlias("unknown")).toBe(false);

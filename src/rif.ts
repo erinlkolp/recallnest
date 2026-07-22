@@ -49,8 +49,12 @@ export function filterInterference(
       const sim = cosineSimilarity(candidate.entry.vector, kept[i].entry.vector);
       if (sim > similarityThreshold) {
         matchedClusterId = clusterMap[i];
-        // Original RIF: demote if score too low relative to stronger result
+        // Original RIF: demote if score too low relative to stronger result.
+        // Push to `demoted` here: matchedClusterId is already set, so the
+        // post-loop `else if (matchedClusterId == null)` never fires and the
+        // candidate would otherwise be dropped from the result set entirely.
         if (candidate.score < kept[i].score * scoreRatio) {
+          demoted.push(candidate);
           isDemoted = true;
           break;
         }
@@ -71,11 +75,9 @@ export function filterInterference(
       clusterMap.push(cid);
       clusterCounts.set(cid, (clusterCounts.get(cid) ?? 0) + 1);
       kept.push(candidate);
-    } else if (matchedClusterId == null) {
-      // Demoted by score ratio, not cluster overflow
-      demoted.push(candidate);
     }
-    // cluster overflow case already pushed to demoted above
+    // Demoted candidates (score-ratio or cluster-overflow) were already pushed
+    // to `demoted` inside the loop above.
   }
 
   // Demoted results go to the end as fallback

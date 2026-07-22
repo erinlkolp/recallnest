@@ -28,8 +28,11 @@ const SKIP_PATTERNS = [
   /^(fresh session|new session|\/new|\/compact|\/restart)/i,
   /HEARTBEAT/i,
   /^\[System/i,
-  // Single emoji or punctuation
-  /^[\p{Emoji}\s.,!?。！？，、]+$/u,
+  // Single emoji or punctuation.
+  // Uses \p{Extended_Pictographic} rather than \p{Emoji}: the latter's Unicode
+  // property also matches ASCII digits 0-9 (and #, *), which wrongly classified
+  // all-numeric queries (e.g. "8080", "8080?") as trivial and skipped them.
+  /^[\p{Extended_Pictographic}\s.,!?。！？，、]+$/u,
   // Single-word pings
   /^(ping|pong|test|debug)\s*[.!?]?$/i,
 ];
