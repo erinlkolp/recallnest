@@ -169,10 +169,33 @@ export function extractCitedIds(text: string): string[] {
   return [...ids];
 }
 
+/**
+ * Split text into sentences, CJK-aware.
+ *
+ * The naive `/(?<=[.!?])\s+/` splitter never fired on CJK text: fullwidth
+ * terminators (。！？) are not in the ASCII class and CJK has no inter-sentence
+ * whitespace, so the whole document collapsed into one "sentence". That made a
+ * single hallucinated citation drop the entire reconstruction and turned the
+ * grounding gate all-or-nothing.
+ *
+ * ASCII terminators split only when followed by whitespace (so "3.14" and
+ * "e.g." are not broken); CJK terminators split immediately since CJK has no
+ * inter-sentence whitespace. The terminator (and any leading whitespace of the
+ * gap) stays attached to the sentence it ends, so joining the pieces with ""
+ * reproduces the original text for both ASCII and CJK input.
+ */
+export function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?]\s)|(?<=[。！？])(?![。！？])/)
+    .filter(s => s.length > 0);
+}
+
 /** Remove sentences containing a specific citation tag. */
 export function removeSentencesWithId(text: string, id: string): string {
-  const sentences = text.split(/(?<=[.!?])\s+/);
-  return sentences.filter(s => !s.includes(`[src:${id}]`)).join(" ");
+  return splitSentences(text)
+    .filter(s => !s.includes(`[src:${id}]`))
+    // Terminators/whitespace stay attached to each sentence, so join with "".
+    .join("");
 }
 
 /**
@@ -183,7 +206,7 @@ export function computeSourceMapCoverage(
   reconstructed: string,
   validIds: Set<string>,
 ): number {
-  const sentences = reconstructed.split(/(?<=[.!?])\s+/).filter(s => s.length > 5);
+  const sentences = splitSentences(reconstructed).filter(s => s.trim().length > 5);
   if (sentences.length === 0) return 0;
 
   let grounded = 0;
@@ -396,7 +419,7 @@ export async function reconstruct(
  * Returns the first sentence that cites the ID, truncated.
  */
 function extractContributionForId(text: string, id: string): string {
-  const sentences = text.split(/(?<=[.!?])\s+/);
+  const sentences = splitSentences(text);
   const match = sentences.find(s => s.includes(`[src:${id}]`));
   if (!match) return "";
   // Strip the citation tag and truncate

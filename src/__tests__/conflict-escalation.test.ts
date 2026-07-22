@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { buildConflictCandidateRecord } from "../conflict-engine.js";
-import { buildConflictEscalationItem, escalateConflicts } from "../conflict-escalation.js";
+import { buildConflictCandidateRecord, reopenConflictCandidate } from "../conflict-engine.js";
+import { buildConflictEscalationItem, escalateConflicts, markConflictEscalated } from "../conflict-escalation.js";
 
 function createConflictRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -182,5 +182,28 @@ describe("escalateConflicts", () => {
     expect(second.escalated).toBe(0);
     expect(second.skipped).toBe(1);
     expect(second.items[0]?.action).toBe("already-escalated");
+  });
+
+  it("re-escalates a reopened conflict that had been escalated before resolution", () => {
+    // A conflict escalated at attention "escalated", then resolved & reopened.
+    // Reopening must clear the escalation-dedup keys so the reopened conflict
+    // is treated as "pending" (re-escalatable), not "already-escalated".
+    const record = createConflictRecord({
+      reopenCount: 2, // after reopen -> 3 -> forces "escalated" attention
+    }) as any;
+
+    const escalated = markConflictEscalated(record, { attention: "escalated" });
+    expect(escalated.lastEscalationAttention).toBe("escalated");
+
+    const reopened = reopenConflictCandidate(escalated);
+    // The dedup keys must be cleared by reopen.
+    expect(reopened.lastEscalationAttention).toBeUndefined();
+    expect(reopened.lastEscalatedAt).toBeUndefined();
+    expect(reopened.reopenCount).toBe(3);
+
+    const item = buildConflictEscalationItem(reopened);
+    expect(item?.attention).toBe("escalated");
+    // Before the fix this was "already-escalated" (stale dedup key survived).
+    expect(item?.action).toBe("pending");
   });
 });

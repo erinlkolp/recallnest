@@ -58,6 +58,12 @@ export function reopenConflictCandidate(record: ConflictCandidateRecord): Confli
     updatedAt: now,
     resolvedAt: undefined,
     resolutionNotes: undefined,
+    // A reopened conflict starts a fresh escalation cycle. Clearing the
+    // escalation-dedup keys ensures that once it re-reaches a stale/escalated
+    // attention level it is re-escalated instead of being skipped as
+    // "already-escalated" against its pre-resolution escalation state.
+    lastEscalationAttention: undefined,
+    lastEscalatedAt: undefined,
   });
 }
 

@@ -16,15 +16,18 @@ function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     text: "User prefers dark mode",
     vector: [0.1, 0.2, 0.3],
     category: "preferences",
+    scope: "project:test",
     importance: 0.75,
     timestamp: Date.now(),
-    metadata: JSON.stringify({ scope: "project:test", importance: 0.75 }),
+    // Production metadata (buildStructuredMetadata) never contains scope or
+    // importance — those are top-level columns. Mirror that here.
+    metadata: JSON.stringify({ source: "agent", tags: ["ui"] }),
     ...overrides,
   };
 }
 
 describe("HP-2: write-verifier", () => {
-  it("passes for a complete entry", async () => {
+  it("passes for a complete entry (production-shaped metadata)", async () => {
     const result = await verifyWrite(mockStore(makeEntry()), "test-id");
     expect(result.ok).toBe(true);
     expect(result.issues).toEqual([]);
@@ -55,22 +58,34 @@ describe("HP-2: write-verifier", () => {
     expect(result.issues).toContain("empty_text");
   });
 
-  it("detects missing scope in metadata", async () => {
+  it("detects missing scope (top-level column)", async () => {
     const result = await verifyWrite(
-      mockStore(makeEntry({ metadata: JSON.stringify({ importance: 0.7 }) })),
+      mockStore(makeEntry({ scope: "" })),
       "test-id",
     );
     expect(result.ok).toBe(false);
     expect(result.issues).toContain("missing_scope");
   });
 
-  it("detects missing importance in metadata", async () => {
+  it("detects missing importance (top-level column)", async () => {
     const result = await verifyWrite(
-      mockStore(makeEntry({ metadata: JSON.stringify({ scope: "test" }) })),
+      mockStore(makeEntry({ importance: NaN })),
       "test-id",
     );
     expect(result.ok).toBe(false);
     expect(result.issues).toContain("missing_importance");
+  });
+
+  it("passes when scope/importance are absent from the metadata blob but present as columns", async () => {
+    // Regression: the old verifier read scope/importance out of the metadata
+    // JSON, so every real write (which stores them as columns) reported
+    // missing_scope + missing_importance, defeating the verifier.
+    const result = await verifyWrite(
+      mockStore(makeEntry({ metadata: JSON.stringify({ source: "agent" }) })),
+      "test-id",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
   });
 
   it("detects corrupt metadata", async () => {
@@ -79,7 +94,7 @@ describe("HP-2: write-verifier", () => {
       "test-id",
     );
     expect(result.ok).toBe(false);
-    expect(result.issues).toContain("missing_scope");
+    expect(result.issues).toContain("corrupt_metadata");
   });
 
   it("respects enabled=false config", async () => {
@@ -113,7 +128,7 @@ describe("HP-2: write-verifier", () => {
 
   it("reports multiple issues at once", async () => {
     const result = await verifyWrite(
-      mockStore(makeEntry({ text: "", vector: [], metadata: "{}" })),
+      mockStore(makeEntry({ text: "", vector: [], scope: "", importance: NaN })),
       "test-id",
     );
     expect(result.ok).toBe(false);

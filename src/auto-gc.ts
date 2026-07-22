@@ -52,7 +52,12 @@ export const DEFAULT_AUTO_GC_CONFIG: AutoGcConfig = {
 // State
 // ---------------------------------------------------------------------------
 
-let lastGcTimestamp = 0;
+// Last-GC timestamps are tracked PER SCOPE. `dream` invokes GC once per scope
+// on a long-lived server, so a single module-global timestamp let the first
+// scope's run starve every other scope for the whole min-hours window. Global
+// (scope-less) maintenance runs share the "__global__" key.
+const GLOBAL_GC_KEY = "__global__";
+const lastGcByScope = new Map<string, number>();
 
 // ---------------------------------------------------------------------------
 // Core
@@ -91,7 +96,10 @@ export async function maybeRunGc(
   auditLogger?: AuditLogger,
   scope?: string,
 ): Promise<GcResult> {
-  const stats = await store.stats();
+  // Count only the target scope for a scoped run — the archival scan below is
+  // scope-restricted, so gating a scoped GC on the store-wide count would prune
+  // a small scope the moment the whole store crosses minMemoryCount.
+  const stats = await store.stats(scope ? [scope] : undefined);
   const totalMemories = stats.totalCount ?? 0;
 
   // Condition 1: enough memories to warrant GC
@@ -99,14 +107,16 @@ export async function maybeRunGc(
     return { triggered: false, reason: "below_memory_threshold", archivedCount: 0, totalChecked: 0 };
   }
 
-  // Condition 2: enough time since last GC
+  // Condition 2: enough time since last GC (tracked per scope)
+  const gcKey = scope ?? GLOBAL_GC_KEY;
+  const lastGcTimestamp = lastGcByScope.get(gcKey) ?? 0;
   const hoursSinceLastGc = (Date.now() - lastGcTimestamp) / 3_600_000;
   if (hoursSinceLastGc < config.minHoursSinceLastGc) {
     return { triggered: false, reason: "too_soon", archivedCount: 0, totalChecked: 0 };
   }
 
   // All conditions met — run GC
-  lastGcTimestamp = Date.now();
+  lastGcByScope.set(gcKey, Date.now());
 
   const now = Date.now();
   let archivedCount = 0;
@@ -204,8 +214,8 @@ export async function maybeRunGc(
 }
 
 /**
- * Reset last GC timestamp (for testing).
+ * Reset last GC timestamps for all scopes (for testing).
  */
 export function resetGcTimestamp(): void {
-  lastGcTimestamp = 0;
+  lastGcByScope.clear();
 }
