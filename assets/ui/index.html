@@ -84,6 +84,26 @@
           </div>
         </section>
 
+        <section class="timeline-view card is-hidden" id="timelineView">
+          <div class="dashboard-header">
+            <h2>Memory Timeline</h2>
+            <div class="timeline-controls">
+              <button class="ghost-button" data-timeline-window="7">7d</button>
+              <button class="ghost-button is-active" data-timeline-window="30">30d</button>
+              <button class="ghost-button" data-timeline-window="90">90d</button>
+            </div>
+          </div>
+          <div class="timeline-lane-toggles" id="timelineLaneToggles">
+            <label><input type="checkbox" value="checkpoints" checked> Checkpoints</label>
+            <label><input type="checkbox" value="events" checked> Events</label>
+            <label><input type="checkbox" value="memories" checked> Memories</label>
+            <label><input type="checkbox" value="cases-patterns"> Cases &amp; Patterns</label>
+          </div>
+          <div class="timeline-axis" id="timelineAxis"></div>
+          <div class="timeline-lanes" id="timelineLanes">Loading timeline…</div>
+          <aside class="timeline-detail is-hidden" id="timelineDetail"></aside>
+        </section>
+
         <section class="control-panel card is-hidden" id="searchView">
           <div class="section-head">
             <h2>Query Console</h2>
@@ -96,6 +116,7 @@
             <button class="view-tab" data-view="skills">Skills</button>
             <button class="view-tab" data-view="pins">Assets</button>
             <button class="view-tab" data-view="exports">Exports</button>
+            <button class="view-tab" data-view="timeline">Timeline</button>
           </div>
 
           <label class="field">

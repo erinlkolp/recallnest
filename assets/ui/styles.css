@@ -814,3 +814,36 @@ textarea { resize: vertical; min-height: 120px; }
     grid-template-columns: 1fr;
   }
 }
+
+.timeline-controls { display: flex; gap: 6px; }
+.timeline-lane-toggles { display: flex; gap: 16px; margin: 8px 0 12px; font-size: 13px; }
+.timeline-lane-toggles label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.timeline-axis {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted, #888);
+  border-bottom: 1px solid var(--border, #444); padding-bottom: 4px; margin-bottom: 8px;
+}
+.timeline-lane { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.timeline-lane-label {
+  width: 96px; flex-shrink: 0; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted, #888);
+}
+.timeline-track {
+  position: relative; flex: 1; height: 22px;
+  background: var(--track, #2a2a2a); border-radius: 11px;
+}
+.timeline-dot {
+  position: absolute; top: 3px; width: 16px; height: 16px; margin-left: -8px;
+  border-radius: 50%; cursor: pointer; border: 2px solid rgba(0,0,0,0.35);
+}
+.timeline-dot:hover { transform: scale(1.25); }
+.timeline-dot.lane-checkpoints { background: #4c8dff; }
+.timeline-dot.lane-events { background: #ff9f43; }
+.timeline-dot.lane-memories { background: #33c27f; }
+.timeline-dot.lane-cases-patterns { background: #c0c0c0; }
+.timeline-detail {
+  margin-top: 14px; padding: 12px; border-radius: 8px;
+  background: var(--track, #2a2a2a); font-size: 13px;
+}
+.timeline-detail h4 { margin: 0 0 6px; }
+.timeline-empty { color: var(--muted, #888); padding: 16px 0; }
