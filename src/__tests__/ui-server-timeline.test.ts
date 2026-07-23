@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { handleTimelineRequest } from "../ui-server.js";
-import type { MemoryEntry } from "../store.js";
+import type { MemoryEntry, MemoryStore } from "../store.js";
 import type { SessionCheckpointRecord } from "../session-schema.js";
+import type { SessionCheckpointStore } from "../session-store.js";
 
 const T = (iso: string) => Date.parse(iso);
 
@@ -13,12 +14,12 @@ function entry(over: Partial<MemoryEntry>): MemoryEntry {
   };
 }
 
-const storeStub = (entries: MemoryEntry[]) => ({
+const storeStub = (entries: MemoryEntry[]): Pick<MemoryStore, "list" | "refresh"> => ({
   refresh: async () => {},
   list: async () => entries,
 });
 
-const checkpointStub = (records: SessionCheckpointRecord[]) => ({
+const checkpointStub = (records: SessionCheckpointRecord[]): Pick<SessionCheckpointStore, "listRecent"> => ({
   listRecent: async () => records,
 });
 
@@ -27,8 +28,8 @@ describe("handleTimelineRequest", () => {
     const url = new URL("http://x/api/timeline?from=2026-07-01&to=2026-07-31");
     const res = await handleTimelineRequest(
       url,
-      storeStub([entry({ id: "ev" })]) as any,
-      checkpointStub([]) as any,
+      storeStub([entry({ id: "ev" })]),
+      checkpointStub([]),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -39,19 +40,39 @@ describe("handleTimelineRequest", () => {
 
   it("rejects an unknown bucket with 400", async () => {
     const url = new URL("http://x/api/timeline?bucket=decade");
-    const res = await handleTimelineRequest(url, storeStub([]) as any, checkpointStub([]) as any);
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
     expect(res.status).toBe(400);
   });
 
   it("rejects from>to with 400", async () => {
     const url = new URL("http://x/api/timeline?from=2026-07-31&to=2026-07-01");
-    const res = await handleTimelineRequest(url, storeStub([]) as any, checkpointStub([]) as any);
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
     expect(res.status).toBe(400);
   });
 
   it("rejects an unknown lane id with 400", async () => {
     const url = new URL("http://x/api/timeline?lanes=events,bogus");
-    const res = await handleTimelineRequest(url, storeStub([]) as any, checkpointStub([]) as any);
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
     expect(res.status).toBe(400);
+  });
+
+  it("defaults to a 30-day window when from/to are omitted", async () => {
+    const url = new URL("http://x/api/timeline");
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const spanMs = Date.parse(body.window.to) - Date.parse(body.window.from);
+    expect(Math.abs(spanMs - 30 * 24 * 60 * 60 * 1000)).toBeLessThan(1000);
+  });
+
+  it("does not call listRecent when the checkpoints lane is not requested", async () => {
+    const url = new URL("http://x/api/timeline?lanes=events");
+    const throwingCheckpoints: Pick<SessionCheckpointStore, "listRecent"> = {
+      listRecent: async () => {
+        throw new Error("should not be called");
+      },
+    };
+    const res = await handleTimelineRequest(url, storeStub([]), throwingCheckpoints);
+    expect(res.status).toBe(200);
   });
 });

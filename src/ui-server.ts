@@ -200,7 +200,7 @@ const BUCKETS: Bucket[] = ["day", "week", "month"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function timelineBadRequest(message: string): Response {
-  return Response.json({ error: message }, { status: 400 });
+  return Response.json({ output: message }, { status: 400 });
 }
 
 export async function handleTimelineRequest(
@@ -233,6 +233,9 @@ export async function handleTimelineRequest(
   }
 
   await store.refresh();
+  // listRecent has no date filter: fetch the 100 newest for the scope, then buildTimeline()
+  // filters to the window. Windows older than the 100 newest checkpoints may show an empty
+  // checkpoints lane (acceptable for v1).
   const checkpointRecords = lanes.includes("checkpoints")
     ? await checkpoints.listRecent({ scope, limit: 100 })
     : [];
