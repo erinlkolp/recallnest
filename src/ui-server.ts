@@ -13,8 +13,12 @@ import { indexAsset, indexPinnedAsset } from "./asset-sync.js";
 import { createComponentResolver, loadConfig, loadDotEnv } from "./runtime-config.js";
 import { buildRetrievalContext, resolveScopeSelection } from "./scope-policy.js";
 import { parseAllowedHostsEnv, validateLocalRequest } from "./server-csrf.js";
+import { SessionCheckpointStore } from "./session-store.js";
+import { buildTimeline } from "./timeline-aggregator.js";
+import type { LaneId, Bucket } from "./types/timeline.js";
 const config = (loadDotEnv(), loadConfig());
 const getComponents = createComponentResolver(config);
+const checkpointStore = new SessionCheckpointStore();
 
 class UiHttpError extends Error {
   status: number;
@@ -190,6 +194,54 @@ async function handleSearch(mode: "search" | "explain" | "distill", body: Record
 const uiPort = readLimit(process.env.RECALLNEST_UI_PORT, 4317, 1, 65535);
 const uiExtraAllowedHosts = parseAllowedHostsEnv(process.env.RECALLNEST_UI_ALLOWED_HOSTS);
 
+const ALL_LANES: LaneId[] = ["checkpoints", "events", "memories", "cases-patterns"];
+const DEFAULT_LANES: LaneId[] = ["checkpoints", "events", "memories"];
+const BUCKETS: Bucket[] = ["day", "week", "month"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function timelineBadRequest(message: string): Response {
+  return Response.json({ error: message }, { status: 400 });
+}
+
+export async function handleTimelineRequest(
+  url: URL,
+  store: Pick<MemoryStore, "list" | "refresh">,
+  checkpoints: Pick<SessionCheckpointStore, "listRecent">,
+): Promise<Response> {
+  const params = url.searchParams;
+  const scope = params.get("scope") ?? undefined;
+
+  const bucketRaw = params.get("bucket") ?? "day";
+  if (!BUCKETS.includes(bucketRaw as Bucket)) {
+    return timelineBadRequest(`invalid bucket: ${bucketRaw}`);
+  }
+  const bucket = bucketRaw as Bucket;
+
+  const toMs = params.has("to") ? Date.parse(params.get("to") as string) : Date.now();
+  if (Number.isNaN(toMs)) return timelineBadRequest("invalid 'to' date");
+  const fromMs = params.has("from") ? Date.parse(params.get("from") as string) : toMs - 30 * DAY_MS;
+  if (Number.isNaN(fromMs)) return timelineBadRequest("invalid 'from' date");
+  if (fromMs > toMs) return timelineBadRequest("'from' must be <= 'to'");
+
+  let lanes = DEFAULT_LANES;
+  const lanesRaw = params.get("lanes");
+  if (lanesRaw) {
+    const parsed = lanesRaw.split(",").map((s) => s.trim()).filter(Boolean) as LaneId[];
+    const unknown = parsed.filter((l) => !ALL_LANES.includes(l));
+    if (unknown.length > 0) return timelineBadRequest(`unknown lane(s): ${unknown.join(", ")}`);
+    lanes = parsed;
+  }
+
+  await store.refresh();
+  const checkpointRecords = lanes.includes("checkpoints")
+    ? await checkpoints.listRecent({ scope, limit: 100 })
+    : [];
+  const entries = await store.list(scope ? [scope] : undefined, undefined, 10000, 0);
+
+  return Response.json(buildTimeline(checkpointRecords, entries, { fromMs, toMs, bucket, lanes }));
+}
+
+if (import.meta.main) {
 const server = Bun.serve({
   port: uiPort,
   hostname: process.env.RECALLNEST_UI_HOST ?? "127.0.0.1",
@@ -511,6 +563,11 @@ const server = Bun.serve({
         });
       }
 
+      if (request.method === "GET" && url.pathname === "/api/timeline") {
+        const { store } = getComponents();
+        return await handleTimelineRequest(url, store, checkpointStore);
+      }
+
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       return errorResponse(error);
@@ -519,3 +576,4 @@ const server = Bun.serve({
 });
 
 console.log(`RecallNest UI running at http://localhost:${server.port}`);
+}
