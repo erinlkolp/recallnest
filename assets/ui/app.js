@@ -766,6 +766,7 @@ function showTimelineDetail(lane, item) {
     .join('');
   timelineDetailEl.innerHTML =
     `<h4>${escapeHtml(item.title)}</h4>` +
+    (item.subtitle ? `<div>${escapeHtml(item.subtitle)}</div>` : '') +
     `<div class="timeline-empty">${escapeHtml(TIMELINE_LANE_LABELS[lane.id] || lane.label)} · ${escapeHtml(when)} · ${escapeHtml(item.scope || 'no scope')}</div>` +
     rows;
   timelineDetailEl.classList.remove('is-hidden');
