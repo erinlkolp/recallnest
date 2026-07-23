@@ -134,4 +134,46 @@ describe("buildTimeline", () => {
     expect(res.skipped).toBe(0);
     expect(res.lanes.every((l) => l.items.length === 0)).toBe(true);
   });
+
+  it("truncates a first line longer than 80 chars with a trailing ellipsis", () => {
+    const longLine = "a".repeat(100);
+    const res = buildTimeline([], [entry({ id: "long", text: longLine })], OPTS);
+    const title = res.lanes.find((l) => l.id === "events")!.items[0].title;
+    expect(title).toHaveLength(80);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title).toBe(`${"a".repeat(79)}…`);
+  });
+
+  it("falls back to (untitled) for empty/whitespace-only text", () => {
+    const res = buildTimeline(
+      [],
+      [entry({ id: "empty", text: "" }), entry({ id: "blank", text: "   " })],
+      OPTS,
+    );
+    const lane = res.lanes.find((l) => l.id === "events")!;
+    const byId = (id: string) => lane.items.find((i) => i.id === id)!;
+    expect(byId("empty").title).toBe("(untitled)");
+    expect(byId("blank").title).toBe("(untitled)");
+  });
+
+  it("parses valid JSON metadata into detail.metadata and empty-objects malformed JSON", () => {
+    const res = buildTimeline(
+      [],
+      [
+        entry({ id: "good", metadata: '{"topicTag":"auth"}' }),
+        entry({ id: "malformed", metadata: "{bad" }),
+      ],
+      OPTS,
+    );
+    const lane = res.lanes.find((l) => l.id === "events")!;
+    const byId = (id: string) => lane.items.find((i) => i.id === id)!;
+    expect(byId("good").detail.metadata).toEqual({ topicTag: "auth" });
+    expect(byId("malformed").detail.metadata).toEqual({});
+  });
+
+  it("falls back to the checkpoint summary as subtitle when nextActions is empty", () => {
+    const res = buildTimeline([checkpoint({ nextActions: [] })], [], OPTS);
+    const lane = res.lanes.find((l) => l.id === "checkpoints")!;
+    expect(lane.items[0].subtitle).toBe("did stuff");
+  });
 });
