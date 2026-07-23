@@ -3,6 +3,7 @@ import { handleTimelineRequest } from "../ui-server.js";
 import type { MemoryEntry, MemoryStore } from "../store.js";
 import type { SessionCheckpointRecord } from "../session-schema.js";
 import type { SessionCheckpointStore } from "../session-store.js";
+import type { TimelineResponse } from "../types/timeline.js";
 
 const T = (iso: string) => Date.parse(iso);
 
@@ -32,10 +33,10 @@ describe("handleTimelineRequest", () => {
       checkpointStub([]),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as TimelineResponse;
     expect(body.window.bucket).toBe("day");
-    expect(body.lanes.map((l: any) => l.id)).toEqual(["checkpoints", "events", "memories"]);
-    expect(body.lanes.find((l: any) => l.id === "events").items[0].id).toBe("ev");
+    expect(body.lanes.map((l) => l.id)).toEqual(["checkpoints", "events", "memories"]);
+    expect(body.lanes.find((l) => l.id === "events")?.items[0]?.id).toBe("ev");
   });
 
   it("rejects an unknown bucket with 400", async () => {
@@ -60,7 +61,7 @@ describe("handleTimelineRequest", () => {
     const url = new URL("http://x/api/timeline");
     const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as TimelineResponse;
     const spanMs = Date.parse(body.window.to) - Date.parse(body.window.from);
     expect(Math.abs(spanMs - 30 * 24 * 60 * 60 * 1000)).toBeLessThan(1000);
   });
