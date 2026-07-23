@@ -209,7 +209,6 @@ export async function handleTimelineRequest(
   checkpoints: Pick<SessionCheckpointStore, "listRecent">,
 ): Promise<Response> {
   const params = url.searchParams;
-  const scope = params.get("scope") ?? undefined;
 
   const bucketRaw = params.get("bucket") ?? "day";
   if (!BUCKETS.includes(bucketRaw as Bucket)) {
@@ -225,21 +224,29 @@ export async function handleTimelineRequest(
 
   let lanes = DEFAULT_LANES;
   const lanesRaw = params.get("lanes");
-  if (lanesRaw) {
+  if (lanesRaw !== null) {
     const parsed = lanesRaw.split(",").map((s) => s.trim()).filter(Boolean) as LaneId[];
     const unknown = parsed.filter((l) => !ALL_LANES.includes(l));
     if (unknown.length > 0) return timelineBadRequest(`unknown lane(s): ${unknown.join(", ")}`);
-    lanes = parsed;
+    lanes = [...new Set(parsed)];
   }
+
+  const scopeSelection = resolveScopeSelection({
+    scope: params.get("scope") ?? undefined,
+    sessionId: params.get("sessionId") ?? undefined,
+    allScopes: params.get("allScopes") === "true",
+    operation: "ui:timeline",
+    allowUnscoped: true,
+  });
 
   await store.refresh();
   // listRecent has no date filter: fetch the 100 newest for the scope, then buildTimeline()
   // filters to the window. Windows older than the 100 newest checkpoints may show an empty
   // checkpoints lane (acceptable for v1).
   const checkpointRecords = lanes.includes("checkpoints")
-    ? await checkpoints.listRecent({ scope, limit: 100 })
+    ? await checkpoints.listRecent({ scope: scopeSelection.resolvedScope, limit: 100 })
     : [];
-  const entries = await store.list(scope ? [scope] : undefined, undefined, 10000, 0);
+  const entries = await store.list(scopeSelection.scopeFilter, undefined, 10000, 0);
 
   return Response.json(buildTimeline(checkpointRecords, entries, { fromMs, toMs, bucket, lanes }));
 }

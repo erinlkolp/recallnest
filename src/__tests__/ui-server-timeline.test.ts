@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { handleTimelineRequest } from "../ui-server.js";
 import type { MemoryEntry, MemoryStore } from "../store.js";
 import type { SessionCheckpointRecord } from "../session-schema.js";
-import type { SessionCheckpointStore } from "../session-store.js";
+import type { SessionCheckpointQuery, SessionCheckpointStore } from "../session-store.js";
 import type { TimelineResponse } from "../types/timeline.js";
 
 const T = (iso: string) => Date.parse(iso);
@@ -15,14 +15,36 @@ function entry(over: Partial<MemoryEntry>): MemoryEntry {
   };
 }
 
-const storeStub = (entries: MemoryEntry[]): Pick<MemoryStore, "list" | "refresh"> => ({
-  refresh: async () => {},
-  list: async () => entries,
-});
+interface StoreStub extends Pick<MemoryStore, "list" | "refresh"> {
+  listCalls: Array<string[] | undefined>;
+}
 
-const checkpointStub = (records: SessionCheckpointRecord[]): Pick<SessionCheckpointStore, "listRecent"> => ({
-  listRecent: async () => records,
-});
+function storeStub(entries: MemoryEntry[]): StoreStub {
+  const listCalls: Array<string[] | undefined> = [];
+  return {
+    listCalls,
+    refresh: async () => {},
+    list: async (scopeFilter) => {
+      listCalls.push(scopeFilter);
+      return entries;
+    },
+  };
+}
+
+interface CheckpointStub extends Pick<SessionCheckpointStore, "listRecent"> {
+  listRecentCalls: SessionCheckpointQuery[];
+}
+
+function checkpointStub(records: SessionCheckpointRecord[]): CheckpointStub {
+  const listRecentCalls: SessionCheckpointQuery[] = [];
+  return {
+    listRecentCalls,
+    listRecent: async (query = {}) => {
+      listRecentCalls.push(query);
+      return records;
+    },
+  };
+}
 
 describe("handleTimelineRequest", () => {
   it("returns 200 with the timeline shape", async () => {
@@ -75,5 +97,31 @@ describe("handleTimelineRequest", () => {
     };
     const res = await handleTimelineRequest(url, storeStub([]), throwingCheckpoints);
     expect(res.status).toBe(200);
+  });
+
+  it("threads an explicit ?scope= through to both store.list and checkpoints.listRecent", async () => {
+    const url = new URL("http://x/api/timeline?scope=project:x");
+    const store = storeStub([]);
+    const checkpoints = checkpointStub([]);
+    const res = await handleTimelineRequest(url, store, checkpoints);
+    expect(res.status).toBe(200);
+    expect(store.listCalls).toEqual([["project:x"]]);
+    expect(checkpoints.listRecentCalls[0]?.scope).toBe("project:x");
+  });
+
+  it("returns an empty lanes list when ?lanes= is present but empty", async () => {
+    const url = new URL("http://x/api/timeline?lanes=");
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TimelineResponse;
+    expect(body.lanes.length).toBe(0);
+  });
+
+  it("dedupes repeated lane ids", async () => {
+    const url = new URL("http://x/api/timeline?lanes=events,events");
+    const res = await handleTimelineRequest(url, storeStub([]), checkpointStub([]));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TimelineResponse;
+    expect(body.lanes.filter((l) => l.id === "events").length).toBe(1);
   });
 });
