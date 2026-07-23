@@ -700,7 +700,7 @@ async function loadTimeline() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     renderTimeline(await res.json());
   } catch (err) {
-    timelineLanesEl.innerHTML = `<div class="timeline-empty">Failed to load timeline: ${err.message}</div>`;
+    timelineLanesEl.innerHTML = `<div class="timeline-empty">Failed to load timeline: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -759,11 +759,14 @@ function showTimelineDetail(lane, item) {
   const when = new Date(item.ts).toLocaleString();
   const rows = Object.entries(item.detail)
     .filter(([, v]) => v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0))
-    .map(([k, v]) => `<div><strong>${k}:</strong> ${Array.isArray(v) ? v.join('; ') : (typeof v === 'object' ? JSON.stringify(v) : v)}</div>`)
+    .map(([k, v]) => {
+      const raw = Array.isArray(v) ? v.join('; ') : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      return `<div><strong>${escapeHtml(k)}:</strong> ${escapeHtml(raw)}</div>`;
+    })
     .join('');
   timelineDetailEl.innerHTML =
-    `<h4>${item.title}</h4>` +
-    `<div class="timeline-empty">${TIMELINE_LANE_LABELS[lane.id] || lane.label} · ${when} · ${item.scope || 'no scope'}</div>` +
+    `<h4>${escapeHtml(item.title)}</h4>` +
+    `<div class="timeline-empty">${escapeHtml(TIMELINE_LANE_LABELS[lane.id] || lane.label)} · ${escapeHtml(when)} · ${escapeHtml(item.scope || 'no scope')}</div>` +
     rows;
   timelineDetailEl.classList.remove('is-hidden');
 }

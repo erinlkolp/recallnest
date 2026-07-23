@@ -820,17 +820,17 @@ textarea { resize: vertical; min-height: 120px; }
 .timeline-lane-toggles label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .timeline-axis {
   display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--muted, #888);
-  border-bottom: 1px solid var(--border, #444); padding-bottom: 4px; margin-bottom: 8px;
+  font-size: 11px; color: var(--muted);
+  border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 8px;
 }
 .timeline-lane { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .timeline-lane-label {
   width: 96px; flex-shrink: 0; font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--muted, #888);
+  letter-spacing: 0.04em; color: var(--muted);
 }
 .timeline-track {
   position: relative; flex: 1; height: 22px;
-  background: var(--track, #2a2a2a); border-radius: 11px;
+  background: var(--line); border-radius: 11px;
 }
 .timeline-dot {
   position: absolute; top: 3px; width: 16px; height: 16px; margin-left: -8px;
@@ -843,7 +843,7 @@ textarea { resize: vertical; min-height: 120px; }
 .timeline-dot.lane-cases-patterns { background: #c0c0c0; }
 .timeline-detail {
   margin-top: 14px; padding: 12px; border-radius: 8px;
-  background: var(--track, #2a2a2a); font-size: 13px;
+  background: var(--paper); border: 1px solid var(--line); font-size: 13px;
 }
 .timeline-detail h4 { margin: 0 0 6px; }
-.timeline-empty { color: var(--muted, #888); padding: 16px 0; }
+.timeline-empty { color: var(--muted); padding: 16px 0; }
