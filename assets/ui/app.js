@@ -28,6 +28,12 @@ const dashboardView = document.getElementById('dashboardView');
 const searchView = document.getElementById('searchView');
 const resultView = document.getElementById('resultView');
 const sideView = document.getElementById('sideView');
+const timelineView = document.getElementById('timelineView');
+const timelineLanesEl = document.getElementById('timelineLanes');
+const timelineAxisEl = document.getElementById('timelineAxis');
+const timelineDetailEl = document.getElementById('timelineDetail');
+const timelineLaneToggles = document.getElementById('timelineLaneToggles');
+let timelineWindowDays = 30;
 
 let currentView = 'dashboard';
 let lastItems = [];
@@ -172,10 +178,13 @@ function setActiveView(view) {
     tab.classList.toggle('is-active', tab.dataset.view === view);
   });
   const showDashboard = view === 'dashboard';
+  const showTimeline = view === 'timeline';
+  const showSearchSurface = !showDashboard && !showTimeline;
   if (dashboardView) dashboardView.classList.toggle('is-hidden', !showDashboard);
-  if (searchView) searchView.classList.toggle('is-hidden', showDashboard);
-  if (resultView) resultView.classList.toggle('is-hidden', showDashboard);
-  if (sideView) sideView.classList.toggle('is-hidden', showDashboard);
+  if (timelineView) timelineView.classList.toggle('is-hidden', !showTimeline);
+  if (searchView) searchView.classList.toggle('is-hidden', !showSearchSurface);
+  if (resultView) resultView.classList.toggle('is-hidden', !showSearchSurface);
+  if (sideView) sideView.classList.toggle('is-hidden', !showSearchSurface);
   const filterEnabled = view === 'pins' || view === 'exports';
   viewToolbar.classList.toggle('is-hidden', !filterEnabled);
   assetTagBar.classList.toggle('is-hidden', view !== 'pins');
@@ -661,6 +670,108 @@ async function loadExports() {
   }
 }
 
+const TIMELINE_LANE_LABELS = {
+  checkpoints: 'Checkpoints',
+  events: 'Events',
+  memories: 'Memories',
+  'cases-patterns': 'Cases & Patterns',
+};
+
+function selectedTimelineLanes() {
+  if (!timelineLaneToggles) return ['checkpoints', 'events', 'memories'];
+  return Array.from(timelineLaneToggles.querySelectorAll('input:checked')).map((i) => i.value);
+}
+
+async function loadTimeline() {
+  if (!timelineLanesEl) return;
+  timelineLanesEl.textContent = 'Loading timeline…';
+  if (timelineDetailEl) timelineDetailEl.classList.add('is-hidden');
+  const to = new Date();
+  const from = new Date(to.getTime() - timelineWindowDays * 24 * 60 * 60 * 1000);
+  const lanes = selectedTimelineLanes();
+  const qs = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+    bucket: timelineWindowDays > 45 ? 'week' : 'day',
+    lanes: lanes.join(','),
+  });
+  try {
+    const res = await fetch(`/api/timeline?${qs.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderTimeline(await res.json());
+  } catch (err) {
+    timelineLanesEl.innerHTML = `<div class="timeline-empty">Failed to load timeline: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderTimeline(data) {
+  const fromMs = Date.parse(data.window.from);
+  const toMs = Date.parse(data.window.to);
+  const span = Math.max(1, toMs - fromMs);
+
+  timelineAxisEl.innerHTML = '';
+  for (let i = 0; i <= 4; i++) {
+    const d = new Date(fromMs + (span * i) / 4);
+    const tick = document.createElement('span');
+    tick.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    timelineAxisEl.appendChild(tick);
+  }
+
+  const total = data.lanes.reduce((n, lane) => n + lane.items.length, 0);
+  if (total === 0) {
+    timelineLanesEl.innerHTML =
+      '<div class="timeline-empty">No memories in this range — widen the window.</div>';
+    return;
+  }
+
+  timelineLanesEl.innerHTML = '';
+  for (const lane of data.lanes) {
+    const row = document.createElement('div');
+    row.className = 'timeline-lane';
+    const label = document.createElement('div');
+    label.className = 'timeline-lane-label';
+    label.textContent = TIMELINE_LANE_LABELS[lane.id] || lane.label;
+    const track = document.createElement('div');
+    track.className = 'timeline-track';
+    for (const item of lane.items) {
+      const dot = document.createElement('button');
+      dot.className = `timeline-dot lane-${lane.id}`;
+      dot.style.left = `${((item.ts - fromMs) / span) * 100}%`;
+      dot.title = item.title;
+      dot.addEventListener('click', () => showTimelineDetail(lane, item));
+      track.appendChild(dot);
+    }
+    row.appendChild(label);
+    row.appendChild(track);
+    timelineLanesEl.appendChild(row);
+  }
+
+  if (data.skipped > 0) {
+    const note = document.createElement('div');
+    note.className = 'timeline-empty';
+    note.textContent = `${data.skipped} item(s) skipped (missing/invalid timestamp).`;
+    timelineLanesEl.appendChild(note);
+  }
+}
+
+function showTimelineDetail(lane, item) {
+  if (!timelineDetailEl) return;
+  const when = new Date(item.ts).toLocaleString();
+  const rows = Object.entries(item.detail)
+    .filter(([, v]) => v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0))
+    .map(([k, v]) => {
+      const raw = Array.isArray(v) ? v.join('; ') : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      return `<div><strong>${escapeHtml(k)}:</strong> ${escapeHtml(raw)}</div>`;
+    })
+    .join('');
+  timelineDetailEl.innerHTML =
+    `<h4>${escapeHtml(item.title)}</h4>` +
+    (item.subtitle ? `<div>${escapeHtml(item.subtitle)}</div>` : '') +
+    `<div class="timeline-empty">${escapeHtml(TIMELINE_LANE_LABELS[lane.id] || lane.label)} · ${escapeHtml(when)} · ${escapeHtml(item.scope || 'no scope')}</div>` +
+    rows;
+  timelineDetailEl.classList.remove('is-hidden');
+}
+
 async function loadSkills() {
   try {
     const data = await api('/api/skills');
@@ -895,6 +1006,9 @@ viewTabs.forEach((tab) => {
     if (view === 'exports') {
       await loadExports();
     }
+    if (view === 'timeline') {
+      await loadTimeline();
+    }
     renderMainSurface();
   });
 });
@@ -967,6 +1081,19 @@ assetTagBar.addEventListener('click', (event) => {
     ? `Filtered assets by tag: ${activeAssetTag}`
     : 'Cleared asset tag filter.';
 });
+
+document.querySelectorAll('[data-timeline-window]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    timelineWindowDays = Number(btn.dataset.timelineWindow);
+    document.querySelectorAll('[data-timeline-window]').forEach((b) => {
+      b.classList.toggle('is-active', b === btn);
+    });
+    loadTimeline();
+  });
+});
+if (timelineLaneToggles) {
+  timelineLaneToggles.addEventListener('change', () => loadTimeline());
+}
 
 queryInput.value = 'telegram bridge';
 profileInput.value = 'debug';

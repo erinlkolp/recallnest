@@ -13,8 +13,12 @@ import { indexAsset, indexPinnedAsset } from "./asset-sync.js";
 import { createComponentResolver, loadConfig, loadDotEnv } from "./runtime-config.js";
 import { buildRetrievalContext, resolveScopeSelection } from "./scope-policy.js";
 import { parseAllowedHostsEnv, validateLocalRequest } from "./server-csrf.js";
+import { SessionCheckpointStore } from "./session-store.js";
+import { buildTimeline } from "./timeline-aggregator.js";
+import type { LaneId, Bucket } from "./types/timeline.js";
 const config = (loadDotEnv(), loadConfig());
 const getComponents = createComponentResolver(config);
+const checkpointStore = new SessionCheckpointStore();
 
 class UiHttpError extends Error {
   status: number;
@@ -190,332 +194,396 @@ async function handleSearch(mode: "search" | "explain" | "distill", body: Record
 const uiPort = readLimit(process.env.RECALLNEST_UI_PORT, 4317, 1, 65535);
 const uiExtraAllowedHosts = parseAllowedHostsEnv(process.env.RECALLNEST_UI_ALLOWED_HOSTS);
 
-const server = Bun.serve({
-  port: uiPort,
-  hostname: process.env.RECALLNEST_UI_HOST ?? "127.0.0.1",
-  async fetch(request) {
-    const blocked = validateLocalRequest(request, { port: uiPort, extraAllowedHosts: uiExtraAllowedHosts });
-    if (blocked) return blocked;
+const ALL_LANES: LaneId[] = ["checkpoints", "events", "memories", "cases-patterns"];
+const DEFAULT_LANES: LaneId[] = ["checkpoints", "events", "memories"];
+const BUCKETS: Bucket[] = ["day", "week", "month"];
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-    try {
-      const url = new URL(request.url);
+function timelineBadRequest(message: string): Response {
+  return Response.json({ output: message }, { status: 400 });
+}
 
-      if (request.method === "GET" && (url.pathname === "/" || url.pathname.startsWith("/ui/"))) {
-        const response = serveStatic(url.pathname);
-        if (response) return response;
-      }
+export async function handleTimelineRequest(
+  url: URL,
+  store: Pick<MemoryStore, "list" | "refresh">,
+  checkpoints: Pick<SessionCheckpointStore, "listRecent">,
+): Promise<Response> {
+  const params = url.searchParams;
 
-      if (request.method === "POST" && url.pathname === "/api/search") {
-        return handleSearch("search", await readJson(request));
-      }
-      if (request.method === "POST" && url.pathname === "/api/explain") {
-        return handleSearch("explain", await readJson(request));
-      }
-      if (request.method === "POST" && url.pathname === "/api/distill") {
-        return handleSearch("distill", await readJson(request));
-      }
+  const bucketRaw = params.get("bucket") ?? "day";
+  if (!BUCKETS.includes(bucketRaw as Bucket)) {
+    return timelineBadRequest(`invalid bucket: ${bucketRaw}`);
+  }
+  const bucket = bucketRaw as Bucket;
 
-      if (request.method === "GET" && url.pathname === "/api/pins") {
-        const rows = listMemoryAssets(readLimit(url.searchParams.get("limit"), 10, 1, 50));
-        const output = rows.length === 0
-          ? "No assets yet."
-          : [
-              "Asset ID  Kind   Title  Scope / Sources  Date",
-              "--------  -----  -----  ---------------  ----------",
-              ...rows.map(row => assetSummaryLine(row)),
-            ].join("\n");
-        return Response.json({
-          output,
-          items: rows.map((row) => ({
-            id: row.id,
-            shortId: row.id.slice(0, 8),
-            type: row.type,
-            title: row.title,
-            summary: row.summary,
-            scope: row.type === "pinned-memory" ? row.source.scope : row.sources.map((item) => item.source).join(", "),
-            createdAt: row.createdAt,
-            date: row.createdAt.slice(0, 10),
-            tags: row.tags,
-            path: row.path,
-            sourceMemoryId: row.type === "pinned-memory" ? row.source.memoryId : undefined,
-            sourceScope: row.type === "pinned-memory" ? row.source.scope : undefined,
-            snippet: row.type === "pinned-memory" ? row.snippet : undefined,
-            retrieval: row.type === "pinned-memory" ? row.retrieval : undefined,
-            hits: row.type === "memory-brief" ? row.hits : undefined,
-            query: row.type === "memory-brief" ? row.query : undefined,
-            profile: row.type === "memory-brief" ? row.profile : undefined,
-            takeaways: row.type === "memory-brief" ? row.takeaways : undefined,
-            evidence: row.type === "memory-brief" ? row.evidence : undefined,
-            reusableCandidates: row.type === "memory-brief" ? row.reusableCandidates : undefined,
-            sources: row.type === "memory-brief" ? row.sources : undefined,
-          })),
-        });
-      }
+  const toMs = params.has("to") ? Date.parse(params.get("to") as string) : Date.now();
+  if (Number.isNaN(toMs)) return timelineBadRequest("invalid 'to' date");
+  const fromMs = params.has("from") ? Date.parse(params.get("from") as string) : toMs - 30 * DAY_MS;
+  if (Number.isNaN(fromMs)) return timelineBadRequest("invalid 'from' date");
+  if (fromMs > toMs) return timelineBadRequest("'from' must be <= 'to'");
 
-      if (request.method === "GET" && url.pathname === "/api/exports") {
-        const rows = listExportArtifacts(readLimit(url.searchParams.get("limit"), 20, 1, 50));
-        const output = rows.length === 0
-          ? "No exports yet."
-          : rows.map((row) => `${row.id.slice(0, 8)}  ${row.query}  [${row.profile}]  ${row.createdAt.slice(0, 10)}`).join("\n");
-        return Response.json({
-          output,
-          items: rows.map((row) => ({
-            id: row.id,
-            shortId: row.id.length > 8 ? row.id.slice(-8) : row.id,
-            query: row.query,
-            profile: row.profile,
-            createdAt: row.createdAt,
-            date: row.createdAt.slice(0, 10),
-            format: row.format,
-            path: row.path,
-            summary: row.summary || "",
-          })),
-        });
-      }
+  let lanes = DEFAULT_LANES;
+  const lanesRaw = params.get("lanes");
+  if (lanesRaw !== null) {
+    const parsed = lanesRaw.split(",").map((s) => s.trim()).filter(Boolean) as LaneId[];
+    const unknown = parsed.filter((l) => !ALL_LANES.includes(l));
+    if (unknown.length > 0) return timelineBadRequest(`unknown lane(s): ${unknown.join(", ")}`);
+    lanes = [...new Set(parsed)];
+  }
 
-      if (request.method === "GET" && url.pathname === "/api/skills") {
-        const { store, embedder } = getComponents();
-        await store.refresh();
-        const { retrieveSkills } = await import("./skill-engine.js");
-        const scope = url.searchParams.get("scope") || undefined;
-        const skills = await retrieveSkills(store, embedder, "all skills", scope, 20);
-        return Response.json({
-          items: skills.map(({ skill, score }) => ({
-            shortId: skill.id.slice(0, 8),
-            name: skill.name,
-            description: skill.description,
-            trigger: skill.triggerPattern,
-            type: skill.implementationType,
-            implementation: skill.implementation,
-            verification: skill.verification,
-            scope: skill.scope,
-            tags: skill.tags,
-            score: Math.round(score * 100),
-            storedAt: skill.storedAt,
-          })),
-        });
-      }
+  const scopeSelection = resolveScopeSelection({
+    scope: params.get("scope") ?? undefined,
+    sessionId: params.get("sessionId") ?? undefined,
+    allScopes: params.get("allScopes") === "true",
+    operation: "ui:timeline",
+    allowUnscoped: true,
+  });
 
-      if (request.method === "GET" && url.pathname === "/api/stats") {
-        const { store } = getComponents();
-        await store.refresh();
-        const stats = await store.stats();
-        const sourceCounts = Object.entries(stats.scopeCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([scope, count]) => `${scope}: ${count}`)
-          .join("\n");
-        return textResponse(`Total: ${stats.totalCount}\n\nBy scope:\n${sourceCounts}`);
-      }
+  await store.refresh();
+  // listRecent has no date filter: fetch the 100 newest for the scope, then buildTimeline()
+  // filters to the window. Windows older than the 100 newest checkpoints may show an empty
+  // checkpoints lane (acceptable for v1).
+  const checkpointRecords = lanes.includes("checkpoints")
+    ? await checkpoints.listRecent({ scope: scopeSelection.resolvedScope, limit: 100 })
+    : [];
+  const entries = await store.list(scopeSelection.scopeFilter, undefined, 10000, 0);
 
-      if (request.method === "GET" && url.pathname === "/api/dirty-briefs") {
-        const rows = listDirtyBriefAssets();
-        const output = rows.length === 0
-          ? "No dirty briefs found."
-          : rows.map((row) => `${row.id.slice(0, 8)}  ${row.title}  [${row.scope}]  ${row.reasons.join("; ")}`).join("\n");
-        return Response.json({
-          output,
-          count: rows.length,
-          items: rows.map((row) => ({
-            id: row.id,
-            shortId: row.id.slice(0, 8),
-            title: row.title,
-            scope: row.scope,
-            reasons: row.reasons,
-            path: row.path,
-          })),
-        });
-      }
+  return Response.json(buildTimeline(checkpointRecords, entries, { fromMs, toMs, bucket, lanes }));
+}
 
-      if (request.method === "POST" && url.pathname === "/api/pin") {
-        const body = await readJson(request);
-        const memoryId = requireString(body.memoryId, "memoryId");
-        const { store, embedder } = getComponents(readOptionalString(body.profile));
-        await store.refresh();
-        const scopeSelection = resolveScopeSelection({
-          scope: readOptionalString(body.scope),
-          sessionId: readOptionalString(body.sessionId),
-          allScopes: readOptionalString(body.scope) ? false : true,
-          operation: "ui:pin",
-        });
-        const entry = await store.get(memoryId, scopeSelection.scopeFilter);
-        if (!entry) return textResponse(`Memory not found: ${memoryId}`, { status: 404 });
-        await store.update(entry.id, { importance: Math.max(entry.importance || 0.7, 0.95) }, scopeSelection.scopeFilter);
-        const asset = buildPinAsset(entryToRetrievalResult(entry), {
-          title: readOptionalString(body.title),
-          summary: readOptionalString(body.summary),
-          query: readOptionalString(body.query),
-          profile: readOptionalString(body.profile) as any || "default",
-        });
-        const path = savePinAsset(asset);
-        await indexPinnedAsset(store, embedder, asset);
-        return Response.json({
-          output: `Pinned ${asset.id.slice(0, 8)}\nMemory: ${entry.id.slice(0, 8)} (${entry.scope})\nPath: ${path}`,
-          assetId: asset.id,
-          memoryId: entry.id,
-          path,
-        });
-      }
+if (import.meta.main) {
+  const server = Bun.serve({
+    port: uiPort,
+    hostname: process.env.RECALLNEST_UI_HOST ?? "127.0.0.1",
+    async fetch(request) {
+      const blocked = validateLocalRequest(request, { port: uiPort, extraAllowedHosts: uiExtraAllowedHosts });
+      if (blocked) return blocked;
 
-      if (request.method === "POST" && url.pathname === "/api/brief") {
-        const body = await readJson(request);
-        const query = requireString(body.query, "query");
-        const { retriever, profile, store, embedder } = getComponents(readOptionalString(body.profile) || "writing");
-        await store.refresh();
-        const results = await retriever.retrieve(buildRetrievalContext({
-          query,
-          limit: readLimit(body.limit, 8, 1, 100),
-          scope: readOptionalString(body.scope),
-          sessionId: readOptionalString(body.sessionId),
-          allScopes: readOptionalString(body.scope) ? false : true,
-        }, {
-          operation: "ui:brief",
-        }));
-        if (results.length === 0) {
-          return textResponse(`No results found for: ${query}`, { status: 404 });
-        }
-        const briefSeedResults = selectBriefSeedResults(results);
-        const summary = summarizeResults(briefSeedResults, { query, profile: profile.name });
-        const asset = buildBriefAsset(summary, { title: readOptionalString(body.title) });
-        const path = saveBriefAsset(asset);
-        await indexAsset(store, embedder, asset);
-        return Response.json({
-          output: `Created brief ${asset.id.slice(0, 8)}\nTitle: ${asset.title}\nHits: ${asset.hits}\nPath: ${path}`,
-          assetId: asset.id,
-          path,
-        });
-      }
+      try {
+        const url = new URL(request.url);
 
-      if (request.method === "POST" && url.pathname === "/api/clean-dirty-briefs") {
-        const rows = listDirtyBriefAssets();
-        if (rows.length === 0) {
-          return Response.json({ output: "No dirty briefs found.", count: 0, archived: 0, deleted: 0 });
+        if (request.method === "GET" && (url.pathname === "/" || url.pathname.startsWith("/ui/"))) {
+          const response = serveStatic(url.pathname);
+          if (response) return response;
         }
 
-        const { store } = getComponents();
-        await store.refresh();
-        let archived = 0;
-        let deleted = 0;
-        for (const row of rows) {
-          archiveDirtyBriefAsset(row);
-          archived += 1;
-          deleted += await store.bulkDelete([row.scope]);
+        if (request.method === "POST" && url.pathname === "/api/search") {
+          return handleSearch("search", await readJson(request));
+        }
+        if (request.method === "POST" && url.pathname === "/api/explain") {
+          return handleSearch("explain", await readJson(request));
+        }
+        if (request.method === "POST" && url.pathname === "/api/distill") {
+          return handleSearch("distill", await readJson(request));
         }
 
-        return Response.json({
-          output: `Dirty briefs: ${rows.length}\nArchived: ${archived}\nIndex rows deleted: ${deleted}`,
-          count: rows.length,
-          archived,
-          deleted,
-        });
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/export") {
-        const body = await readJson(request);
-        const query = requireString(body.query, "query");
-        const { retriever, profile, store } = getComponents(readOptionalString(body.profile) || "writing");
-        await store.refresh();
-        const results = await retriever.retrieve(buildRetrievalContext({
-          query,
-          limit: readLimit(body.limit, 8, 1, 100),
-          scope: readOptionalString(body.scope),
-          sessionId: readOptionalString(body.sessionId),
-          allScopes: readOptionalString(body.scope) ? false : true,
-        }, {
-          operation: "ui:export",
-        }));
-        const summary = distillResults(results, { query, profile: profile.name });
-        const artifact = writeExportArtifact({
-          query,
-          profile: profile.name,
-          results,
-          summary,
-          format: body.format === "json" ? "json" : "md",
-        });
-        return Response.json({
-          output: `Exported ${artifact.id.slice(0, 8)}\nFormat: ${artifact.format}\nPath: ${artifact.outputPath}`,
-          artifactId: artifact.id,
-          format: artifact.format,
-          path: artifact.outputPath,
-        });
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/open-path") {
-        const body = await readJson(request);
-        const targetPath = requireString(body.path, "path");
-        if (!existsSync(targetPath) || !isAllowedArtifactPath(targetPath)) {
-          return textResponse("Path is not allowed.", { status: 400 });
+        if (request.method === "GET" && url.pathname === "/api/pins") {
+          const rows = listMemoryAssets(readLimit(url.searchParams.get("limit"), 10, 1, 50));
+          const output = rows.length === 0
+            ? "No assets yet."
+            : [
+                "Asset ID  Kind   Title  Scope / Sources  Date",
+                "--------  -----  -----  ---------------  ----------",
+                ...rows.map(row => assetSummaryLine(row)),
+              ].join("\n");
+          return Response.json({
+            output,
+            items: rows.map((row) => ({
+              id: row.id,
+              shortId: row.id.slice(0, 8),
+              type: row.type,
+              title: row.title,
+              summary: row.summary,
+              scope: row.type === "pinned-memory" ? row.source.scope : row.sources.map((item) => item.source).join(", "),
+              createdAt: row.createdAt,
+              date: row.createdAt.slice(0, 10),
+              tags: row.tags,
+              path: row.path,
+              sourceMemoryId: row.type === "pinned-memory" ? row.source.memoryId : undefined,
+              sourceScope: row.type === "pinned-memory" ? row.source.scope : undefined,
+              snippet: row.type === "pinned-memory" ? row.snippet : undefined,
+              retrieval: row.type === "pinned-memory" ? row.retrieval : undefined,
+              hits: row.type === "memory-brief" ? row.hits : undefined,
+              query: row.type === "memory-brief" ? row.query : undefined,
+              profile: row.type === "memory-brief" ? row.profile : undefined,
+              takeaways: row.type === "memory-brief" ? row.takeaways : undefined,
+              evidence: row.type === "memory-brief" ? row.evidence : undefined,
+              reusableCandidates: row.type === "memory-brief" ? row.reusableCandidates : undefined,
+              sources: row.type === "memory-brief" ? row.sources : undefined,
+            })),
+          });
         }
 
-        const proc = Bun.spawn(["open", targetPath], {
-          stdout: "ignore",
-          stderr: "pipe",
-        });
-        const exitCode = await proc.exited;
-        if (exitCode !== 0) {
-          const errText = await new Response(proc.stderr).text();
-          return textResponse(`Failed to open path: ${errText}`, { status: 500 });
+        if (request.method === "GET" && url.pathname === "/api/exports") {
+          const rows = listExportArtifacts(readLimit(url.searchParams.get("limit"), 20, 1, 50));
+          const output = rows.length === 0
+            ? "No exports yet."
+            : rows.map((row) => `${row.id.slice(0, 8)}  ${row.query}  [${row.profile}]  ${row.createdAt.slice(0, 10)}`).join("\n");
+          return Response.json({
+            output,
+            items: rows.map((row) => ({
+              id: row.id,
+              shortId: row.id.length > 8 ? row.id.slice(-8) : row.id,
+              query: row.query,
+              profile: row.profile,
+              createdAt: row.createdAt,
+              date: row.createdAt.slice(0, 10),
+              format: row.format,
+              path: row.path,
+              summary: row.summary || "",
+            })),
+          });
         }
 
-        return Response.json({
-          output: `Opened ${targetPath}`,
-          path: targetPath,
-        });
+        if (request.method === "GET" && url.pathname === "/api/skills") {
+          const { store, embedder } = getComponents();
+          await store.refresh();
+          const { retrieveSkills } = await import("./skill-engine.js");
+          const scope = url.searchParams.get("scope") || undefined;
+          const skills = await retrieveSkills(store, embedder, "all skills", scope, 20);
+          return Response.json({
+            items: skills.map(({ skill, score }) => ({
+              shortId: skill.id.slice(0, 8),
+              name: skill.name,
+              description: skill.description,
+              trigger: skill.triggerPattern,
+              type: skill.implementationType,
+              implementation: skill.implementation,
+              verification: skill.verification,
+              scope: skill.scope,
+              tags: skill.tags,
+              score: Math.round(score * 100),
+              storedAt: skill.storedAt,
+            })),
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/stats") {
+          const { store } = getComponents();
+          await store.refresh();
+          const stats = await store.stats();
+          const sourceCounts = Object.entries(stats.scopeCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([scope, count]) => `${scope}: ${count}`)
+            .join("\n");
+          return textResponse(`Total: ${stats.totalCount}\n\nBy scope:\n${sourceCounts}`);
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/dirty-briefs") {
+          const rows = listDirtyBriefAssets();
+          const output = rows.length === 0
+            ? "No dirty briefs found."
+            : rows.map((row) => `${row.id.slice(0, 8)}  ${row.title}  [${row.scope}]  ${row.reasons.join("; ")}`).join("\n");
+          return Response.json({
+            output,
+            count: rows.length,
+            items: rows.map((row) => ({
+              id: row.id,
+              shortId: row.id.slice(0, 8),
+              title: row.title,
+              scope: row.scope,
+              reasons: row.reasons,
+              path: row.path,
+            })),
+          });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/pin") {
+          const body = await readJson(request);
+          const memoryId = requireString(body.memoryId, "memoryId");
+          const { store, embedder } = getComponents(readOptionalString(body.profile));
+          await store.refresh();
+          const scopeSelection = resolveScopeSelection({
+            scope: readOptionalString(body.scope),
+            sessionId: readOptionalString(body.sessionId),
+            allScopes: readOptionalString(body.scope) ? false : true,
+            operation: "ui:pin",
+          });
+          const entry = await store.get(memoryId, scopeSelection.scopeFilter);
+          if (!entry) return textResponse(`Memory not found: ${memoryId}`, { status: 404 });
+          await store.update(entry.id, { importance: Math.max(entry.importance || 0.7, 0.95) }, scopeSelection.scopeFilter);
+          const asset = buildPinAsset(entryToRetrievalResult(entry), {
+            title: readOptionalString(body.title),
+            summary: readOptionalString(body.summary),
+            query: readOptionalString(body.query),
+            profile: readOptionalString(body.profile) as any || "default",
+          });
+          const path = savePinAsset(asset);
+          await indexPinnedAsset(store, embedder, asset);
+          return Response.json({
+            output: `Pinned ${asset.id.slice(0, 8)}\nMemory: ${entry.id.slice(0, 8)} (${entry.scope})\nPath: ${path}`,
+            assetId: asset.id,
+            memoryId: entry.id,
+            path,
+          });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/brief") {
+          const body = await readJson(request);
+          const query = requireString(body.query, "query");
+          const { retriever, profile, store, embedder } = getComponents(readOptionalString(body.profile) || "writing");
+          await store.refresh();
+          const results = await retriever.retrieve(buildRetrievalContext({
+            query,
+            limit: readLimit(body.limit, 8, 1, 100),
+            scope: readOptionalString(body.scope),
+            sessionId: readOptionalString(body.sessionId),
+            allScopes: readOptionalString(body.scope) ? false : true,
+          }, {
+            operation: "ui:brief",
+          }));
+          if (results.length === 0) {
+            return textResponse(`No results found for: ${query}`, { status: 404 });
+          }
+          const briefSeedResults = selectBriefSeedResults(results);
+          const summary = summarizeResults(briefSeedResults, { query, profile: profile.name });
+          const asset = buildBriefAsset(summary, { title: readOptionalString(body.title) });
+          const path = saveBriefAsset(asset);
+          await indexAsset(store, embedder, asset);
+          return Response.json({
+            output: `Created brief ${asset.id.slice(0, 8)}\nTitle: ${asset.title}\nHits: ${asset.hits}\nPath: ${path}`,
+            assetId: asset.id,
+            path,
+          });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/clean-dirty-briefs") {
+          const rows = listDirtyBriefAssets();
+          if (rows.length === 0) {
+            return Response.json({ output: "No dirty briefs found.", count: 0, archived: 0, deleted: 0 });
+          }
+
+          const { store } = getComponents();
+          await store.refresh();
+          let archived = 0;
+          let deleted = 0;
+          for (const row of rows) {
+            archiveDirtyBriefAsset(row);
+            archived += 1;
+            deleted += await store.bulkDelete([row.scope]);
+          }
+
+          return Response.json({
+            output: `Dirty briefs: ${rows.length}\nArchived: ${archived}\nIndex rows deleted: ${deleted}`,
+            count: rows.length,
+            archived,
+            deleted,
+          });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/export") {
+          const body = await readJson(request);
+          const query = requireString(body.query, "query");
+          const { retriever, profile, store } = getComponents(readOptionalString(body.profile) || "writing");
+          await store.refresh();
+          const results = await retriever.retrieve(buildRetrievalContext({
+            query,
+            limit: readLimit(body.limit, 8, 1, 100),
+            scope: readOptionalString(body.scope),
+            sessionId: readOptionalString(body.sessionId),
+            allScopes: readOptionalString(body.scope) ? false : true,
+          }, {
+            operation: "ui:export",
+          }));
+          const summary = distillResults(results, { query, profile: profile.name });
+          const artifact = writeExportArtifact({
+            query,
+            profile: profile.name,
+            results,
+            summary,
+            format: body.format === "json" ? "json" : "md",
+          });
+          return Response.json({
+            output: `Exported ${artifact.id.slice(0, 8)}\nFormat: ${artifact.format}\nPath: ${artifact.outputPath}`,
+            artifactId: artifact.id,
+            format: artifact.format,
+            path: artifact.outputPath,
+          });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/open-path") {
+          const body = await readJson(request);
+          const targetPath = requireString(body.path, "path");
+          if (!existsSync(targetPath) || !isAllowedArtifactPath(targetPath)) {
+            return textResponse("Path is not allowed.", { status: 400 });
+          }
+
+          const proc = Bun.spawn(["open", targetPath], {
+            stdout: "ignore",
+            stderr: "pipe",
+          });
+          const exitCode = await proc.exited;
+          if (exitCode !== 0) {
+            const errText = await new Response(proc.stderr).text();
+            return textResponse(`Failed to open path: ${errText}`, { status: 500 });
+          }
+
+          return Response.json({
+            output: `Opened ${targetPath}`,
+            path: targetPath,
+          });
+        }
+
+        // ----- Dashboard API -----
+        if (request.method === "GET" && url.pathname === "/api/dashboard-stats") {
+          const { store } = getComponents();
+          await store.refresh();
+          const stats = await store.stats();
+          const allEntries = await store.list(undefined, undefined, 10000, 0);
+
+          const now = Date.now();
+          const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+          const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+          const thisWeek = allEntries.filter(e => e.timestamp > weekAgo).length;
+          const thisMonth = allEntries.filter(e => e.timestamp > monthAgo).length;
+
+          return Response.json({
+            totalCount: stats.totalCount,
+            categoryCounts: stats.categoryCounts,
+            scopeCounts: stats.scopeCounts,
+            growth: { thisWeek, thisMonth },
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/stale-memories") {
+          const { store } = getComponents();
+          await store.refresh();
+          const { runMemoryLint } = await import("./memory-lint.js");
+          const report = await runMemoryLint({ store });
+          const staleFindings = report.findings.filter(f => f.check === "stale");
+          return Response.json({
+            count: staleFindings.length,
+            items: staleFindings.slice(0, 20).map(f => ({
+              detail: f.detail,
+              memoryIds: f.memoryIds,
+            })),
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/lint-summary") {
+          const { store } = getComponents();
+          await store.refresh();
+          const { runMemoryLint } = await import("./memory-lint.js");
+          const report = await runMemoryLint({ store });
+          return Response.json({
+            healthScore: report.healthScore,
+            totalScanned: report.totalScanned,
+            summary: report.summary,
+            timestamp: report.timestamp,
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/timeline") {
+          const { store } = getComponents();
+          return await handleTimelineRequest(url, store, checkpointStore);
+        }
+
+        return new Response("Not Found", { status: 404 });
+      } catch (error) {
+        return errorResponse(error);
       }
+    },
+  });
 
-      // ----- Dashboard API -----
-      if (request.method === "GET" && url.pathname === "/api/dashboard-stats") {
-        const { store } = getComponents();
-        await store.refresh();
-        const stats = await store.stats();
-        const allEntries = await store.list(undefined, undefined, 10000, 0);
-
-        const now = Date.now();
-        const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-        const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
-        const thisWeek = allEntries.filter(e => e.timestamp > weekAgo).length;
-        const thisMonth = allEntries.filter(e => e.timestamp > monthAgo).length;
-
-        return Response.json({
-          totalCount: stats.totalCount,
-          categoryCounts: stats.categoryCounts,
-          scopeCounts: stats.scopeCounts,
-          growth: { thisWeek, thisMonth },
-        });
-      }
-
-      if (request.method === "GET" && url.pathname === "/api/stale-memories") {
-        const { store } = getComponents();
-        await store.refresh();
-        const { runMemoryLint } = await import("./memory-lint.js");
-        const report = await runMemoryLint({ store });
-        const staleFindings = report.findings.filter(f => f.check === "stale");
-        return Response.json({
-          count: staleFindings.length,
-          items: staleFindings.slice(0, 20).map(f => ({
-            detail: f.detail,
-            memoryIds: f.memoryIds,
-          })),
-        });
-      }
-
-      if (request.method === "GET" && url.pathname === "/api/lint-summary") {
-        const { store } = getComponents();
-        await store.refresh();
-        const { runMemoryLint } = await import("./memory-lint.js");
-        const report = await runMemoryLint({ store });
-        return Response.json({
-          healthScore: report.healthScore,
-          totalScanned: report.totalScanned,
-          summary: report.summary,
-          timestamp: report.timestamp,
-        });
-      }
-
-      return new Response("Not Found", { status: 404 });
-    } catch (error) {
-      return errorResponse(error);
-    }
-  },
-});
-
-console.log(`RecallNest UI running at http://localhost:${server.port}`);
+  console.log(`RecallNest UI running at http://localhost:${server.port}`);
+}

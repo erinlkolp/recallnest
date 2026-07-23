@@ -43,5 +43,5 @@
 ## 6. Test Baseline
 
 - After changing code, you must run `bun test`; only commit once the full suite passes
-- Current baseline: 1553 tests / 0 fail
+- Current baseline: 1574 tests / 0 fail
 - New features must come with tests; the baseline may only go up, never down
