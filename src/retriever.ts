@@ -727,8 +727,12 @@ export class MemoryRetriever {
       ? clampInt(safeLimit * TOPIC_TAG_OVERFETCH_FACTOR, 1, TOPIC_TAG_OVERFETCH_MAX)
       : safeLimit;
 
-    // Adaptive retrieval: skip trivial queries to save embedding API calls
-    if (shouldSkipRetrieval(query)) {
+    // Adaptive retrieval: skip trivial queries to save embedding API calls.
+    // Only passive auto-recall is gated. An explicit search (MCP tool, CLI,
+    // API) is a deliberate request, so a short keyword query like "LanceDB"
+    // must still be answered — silently returning [] there is indistinguishable
+    // from an empty memory store.
+    if (context.source === "auto-recall" && shouldSkipRetrieval(query)) {
       return [];
     }
 
