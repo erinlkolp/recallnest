@@ -61,7 +61,7 @@ export interface IngestBoundaryResolution {
   boundary: MemoryBoundaryMetadata;
 }
 
-const TRANSCRIPT_SOURCES = new Set(["cc", "codex", "gemini"]);
+const TRANSCRIPT_SOURCES = new Set(["cc", "codex", "gemini", "conversation_import"]);
 const TRANSCRIPT_SCOPE_PREFIXES = ["cc:", "codex:", "gemini:"];
 
 export function getConflictPolicyForCategory(category: DurableMemoryCategory): MemoryConflictPolicy {
@@ -91,6 +91,29 @@ export function buildStructuredMemoryBoundary(
     conflictPolicy: getConflictPolicyForCategory(category),
     originalCategory: category,
     note: "Structured memory writes are the durable source inside RecallNest.",
+  };
+}
+
+/**
+ * Boundary for structured writes (persistMemory and friends). Structured writes
+ * are durable by default, but a transcript-derived source stays evidence until
+ * promote_memory lifts it — otherwise imported transcripts would silently gain
+ * curated-memory authority, which is exactly what the boundary system prevents.
+ */
+export function resolveStructuredWriteBoundary(params: {
+  source: string;
+  category: DurableMemoryCategory;
+}): MemoryBoundaryMetadata {
+  if (!isTranscriptIngestSource(params.source)) {
+    return buildStructuredMemoryBoundary(params.category);
+  }
+
+  return {
+    layer: "evidence",
+    authority: "transcript-ingest",
+    conflictPolicy: "append-only",
+    originalCategory: params.category,
+    note: "Transcript-derived memories are evidence and should not override curated memory.",
   };
 }
 

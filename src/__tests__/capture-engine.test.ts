@@ -1183,3 +1183,53 @@ describe("promoteMemory", () => {
     expect(storedEntries).toHaveLength(2);
   });
 });
+
+describe("persistMemory boundary resolution", () => {
+  it("writes conversation_import entries as transcript evidence", async () => {
+    const { deps, storedEntries } = createDeps();
+    await persistMemory(deps as any, {
+      text: "[user] We ship on Fridays now.",
+      category: "events",
+      scope: TEST_SCOPE,
+      source: "conversation_import",
+    });
+
+    const boundary = JSON.parse(storedEntries[0].metadata).boundary;
+    expect(boundary.layer).toBe("evidence");
+    expect(boundary.authority).toBe("transcript-ingest");
+  });
+
+  it("keeps manual and agent writes durable", async () => {
+    const { deps, storedEntries } = createDeps();
+    await persistMemory(deps as any, {
+      text: "User prefers dark mode",
+      category: "preferences",
+      scope: TEST_SCOPE,
+      source: "manual",
+    });
+
+    const boundary = JSON.parse(storedEntries[0].metadata).boundary;
+    expect(boundary.layer).toBe("durable");
+    expect(boundary.authority).toBe("structured-memory");
+  });
+
+  it("makes imported transcripts promotable via promote_memory", async () => {
+    const { deps } = createDeps();
+    const imported = await persistMemory(deps as any, {
+      text: "[user] Actually I want concise replies from now on.",
+      category: "events",
+      scope: TEST_SCOPE,
+      source: "conversation_import",
+    });
+
+    const promoted = await promoteMemory(deps as any, {
+      memoryId: imported.id,
+      text: "User prefers concise replies.",
+      category: "preferences",
+      scope: TEST_SCOPE,
+    });
+
+    expect(promoted.disposition).toBe("promoted");
+    expect(promoted.sourceMemoryId).toBe(imported.id);
+  });
+});
