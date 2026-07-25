@@ -269,3 +269,64 @@ describe("formatMemoryLintReport", () => {
     expect(output).toContain("10 memories not accessed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cross-category contradiction detection
+// ---------------------------------------------------------------------------
+
+describe("cross-category contradictions", () => {
+  function makeTagged(id: string, text: string, category: string, tags: string[]): MemoryEntry {
+    return makeEntry({
+      id,
+      text,
+      category,
+      vector: [1, 0.2, 0, 0, 0],
+      metadata: JSON.stringify({
+        tags,
+        evolution: { status: "active", accessCount: 0, lastAccessedAt: null },
+      }),
+    });
+  }
+
+  it("flags a correction that contradicts a fact stored in another category", async () => {
+    const entries = [
+      makeTagged(
+        "fact-1",
+        "Remember that the deploy window is Tuesdays",
+        "events",
+        ["auto-capture:explicit-memory-instruction"],
+      ),
+      makeTagged(
+        "fix-1",
+        "Correction - Thursdays, not Tuesdays for the deploy window",
+        "cases",
+        ["auto-capture:correction-signal"],
+      ),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(1);
+    expect(report.findings[0].memoryIds.sort()).toEqual(["fact-1", "fix-1"]);
+    expect(report.healthScore).toBeLessThan(100);
+  });
+
+  it("stays quiet on an append-only event timeline with no correction marker", async () => {
+    const entries = [
+      makeTagged("e1", "We deployed release v1 to production on Monday", "events", []),
+      makeTagged("e2", "We should never deploy release v1 again, always use v2", "events", []),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(0);
+  });
+
+  it("flags a stable-category memory contradicting an event", async () => {
+    const entries = [
+      makeTagged("p1", "The deploy window is always Tuesdays", "preferences", []),
+      makeTagged("e1", "The deploy window is not Tuesdays anymore", "events", []),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(1);
+  });
+});
