@@ -1184,6 +1184,12 @@ registerTool(
   },
   async ({ query, limit, scope, sessionId, allScopes, profile: profileName, title }) => {
     const { retriever, profile, store, embedder } = getComponents(profileName || "writing");
+    const scopeSelection = resolveScopeSelection({
+      scope,
+      sessionId,
+      allScopes,
+      operation: "brief_memory",
+    });
     const results = await retriever.retrieve(buildRetrievalContext({
       query,
       limit,
@@ -1198,7 +1204,7 @@ registerTool(
     }
     const briefSeedResults = selectBriefSeedResults(results);
     const summary = summarizeResults(briefSeedResults, { query, profile: profile.name });
-    const asset = buildBriefAsset(summary, { title });
+    const asset = buildBriefAsset(summary, { title, scope: scopeSelection.resolvedScope });
     const path = saveBriefAsset(asset);
     await indexAsset(store, embedder, asset);
 
@@ -1461,6 +1467,9 @@ registerTool(
     ];
     if (result.pinsRemoved > 0) {
       lines.push(`Pins removed: ${result.pinsRemoved}`);
+    }
+    if (result.briefsRemoved > 0) {
+      lines.push(`Briefs removed: ${result.briefsRemoved}`);
     }
     if (result.evidence?.reason) {
       lines.push(`Reason: ${result.evidence.reason}`);

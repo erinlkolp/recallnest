@@ -42,6 +42,8 @@ export interface BriefAsset {
   query: string;
   profile: RetrievalProfileName;
   hits: number;
+  /** Scope the brief was built from, so the asset stays traceable to its origin. */
+  scope?: string;
   sources: DistilledSummary["sources"];
   takeaways: string[];
   evidence: DistilledSummary["evidence"];
@@ -176,11 +178,14 @@ export function savePinAsset(asset: PinAsset): string {
 
 export function buildBriefAsset(
   summary: DistilledSummary,
-  options: { title?: string } = {},
+  options: { title?: string; scope?: string } = {},
 ): BriefAsset {
   const now = new Date().toISOString();
   const takeaways = summary.takeaways.slice(0, 4);
   const fallbackSummary = takeaways.map((item) => item.replace(/^[^:]+:\s*/, "")).join(" ").trim();
+  // Fall back to the evidence scope so briefs built without an explicit scope
+  // still point back at where their sources live.
+  const scope = options.scope || summary.evidence.find((item) => item.scope)?.scope;
 
   return {
     id: randomUUID(),
@@ -193,6 +198,7 @@ export function buildBriefAsset(
     query: summary.query,
     profile: summary.profile,
     hits: summary.hits,
+    ...(scope ? { scope } : {}),
     sources: summary.sources,
     takeaways,
     evidence: summary.evidence.slice(0, 6),

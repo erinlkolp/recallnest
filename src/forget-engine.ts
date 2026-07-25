@@ -11,6 +11,7 @@
  * 3. Evidence export (snapshot before deletion for audit trail)
  * 4. KG triple cleanup (via KGStore.deleteBySource)
  * 5. Pin cascade (delete derived pin assets and their indexed entries)
+ * 5b. Brief cascade (delete derived brief assets and their indexed entries)
  * 6. Cascade demote (related memories via cascade-forget.ts)
  * 7. Evolution breadcrumb (mark status before delete)
  * 8. Primary delete (remove from LanceDB)
@@ -25,10 +26,13 @@ import type { AuditLogger } from "./audit-log.js";
 import { parsePrivacyTier, type PrivacyTier } from "./memory-schema.js";
 import { parseEvolution, patchEvolution } from "./memory-evolution.js";
 import { cascadeForget, type CascadeForgetConfig, DEFAULT_CASCADE_FORGET_CONFIG } from "./cascade-forget.js";
-import { listPinAssets, type PinAsset } from "./memory-assets.js";
+import { listBriefAssets, listPinAssets, type BriefAsset, type PinAsset } from "./memory-assets.js";
 
 /** Upper bound on pin files scanned when looking for derived pins to remove. */
 const PIN_SCAN_LIMIT = 500;
+
+/** Upper bound on brief files scanned when looking for derived briefs to remove. */
+const BRIEF_SCAN_LIMIT = 500;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,6 +75,8 @@ export interface ForgetResult {
   cascadeResult: { demotedCount: number; demotedIds: string[] };
   /** Number of derived pin assets removed */
   pinsRemoved: number;
+  /** Number of derived brief assets removed */
+  briefsRemoved: number;
   /** Error message if failed */
   error?: string;
 }
@@ -86,6 +92,17 @@ const DISK_PIN_ASSETS: PinAssetAccess = {
   remove: (path: string) => rmSync(path, { force: true }),
 };
 
+/** Brief asset access, injectable so the cascade can be tested without disk I/O. */
+export interface BriefAssetAccess {
+  list: (limit?: number) => Array<BriefAsset & { path: string }>;
+  remove: (path: string) => void;
+}
+
+const DISK_BRIEF_ASSETS: BriefAssetAccess = {
+  list: (limit = BRIEF_SCAN_LIMIT) => listBriefAssets(limit),
+  remove: (path: string) => rmSync(path, { force: true }),
+};
+
 export interface ForgetByIdDeps {
   store: MemoryStore;
   kgStore?: KGStore | null;
@@ -93,6 +110,8 @@ export interface ForgetByIdDeps {
   cascadeConfig?: CascadeForgetConfig;
   /** Defaults to the on-disk pin store. */
   pinAssets?: PinAssetAccess;
+  /** Defaults to the on-disk brief store. */
+  briefAssets?: BriefAssetAccess;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +124,7 @@ export async function forgetMemory(
 ): Promise<ForgetResult> {
   const { store, kgStore, auditLogger, cascadeConfig } = deps;
   const pinAssets = deps.pinAssets ?? DISK_PIN_ASSETS;
+  const briefAssets = deps.briefAssets ?? DISK_BRIEF_ASSETS;
   const { memoryId, confirm, reason, scopeFilter } = request;
 
   // 1. Fetch target
@@ -116,6 +136,7 @@ export async function forgetMemory(
       kgTriplesRemoved: false,
       cascadeResult: { demotedCount: 0, demotedIds: [] },
       pinsRemoved: 0,
+      briefsRemoved: 0,
       error: `Memory ${memoryId} not found`,
     };
   }
@@ -129,6 +150,7 @@ export async function forgetMemory(
       kgTriplesRemoved: false,
       cascadeResult: { demotedCount: 0, demotedIds: [] },
       pinsRemoved: 0,
+      briefsRemoved: 0,
       error: `Memory ${entry.id} has privacy tier "durable" — set confirm=true to proceed`,
     };
   }
@@ -171,6 +193,24 @@ export async function forgetMemory(
     console.error("[recallnest] Pin cascade failed during forget:", err instanceof Error ? err.message : String(err));
   }
 
+  // 5b. Brief cascade — a brief quotes its sources verbatim in summary,
+  // takeaways, and evidence. One forgotten source is enough to leave that text
+  // searchable through the brief, so drop any brief citing this memory along
+  // with the `asset:brief:*` entry that indexes it.
+  let briefsRemoved = 0;
+  try {
+    const derivedBriefs = briefAssets.list(BRIEF_SCAN_LIMIT)
+      .filter((brief) => brief.evidence.some((item) => item.memoryId === entry.id));
+    for (const brief of derivedBriefs) {
+      // indexAsset() files briefs under scope `asset:brief:<first 8 of brief id>`
+      await store.bulkDelete([`asset:brief:${brief.id.slice(0, 8)}`]);
+      briefAssets.remove(brief.path);
+      briefsRemoved++;
+    }
+  } catch (err) {
+    console.error("[recallnest] Brief cascade failed during forget:", err instanceof Error ? err.message : String(err));
+  }
+
   // 6. Cascade demote (related memories get importance reduction)
   let cascadeResult = { demotedCount: 0, demotedIds: [] as string[] };
   try {
@@ -205,6 +245,7 @@ export async function forgetMemory(
       kgTriplesRemoved,
       cascadeResult,
       pinsRemoved,
+      briefsRemoved,
       error: `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -238,6 +279,7 @@ export async function forgetMemory(
     kgTriplesRemoved,
     cascadeResult,
     pinsRemoved,
+    briefsRemoved,
   };
 }
 
