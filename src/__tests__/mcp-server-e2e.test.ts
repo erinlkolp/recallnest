@@ -67,4 +67,35 @@ describe("mcp-server end-to-end over stdio", () => {
       await client.close().catch(() => undefined);
     }
   }, 30_000);
+
+  it("list_tools --tier=full describes tools the current tier skipped", async () => {
+    const configPath = writeTempConfig();
+    const transport = new StdioClientTransport({
+      command: "bun",
+      args: [resolve(import.meta.dir, "../mcp-server.ts")],
+      env: {
+        ...process.env as Record<string, string>,
+        LOCAL_MEMORY_CONFIG: configPath,
+      },
+    });
+    const client = new Client({ name: "e2e-test", version: "0.0.1" });
+
+    try {
+      await client.connect(transport);
+
+      const result = await client.callTool({
+        name: "list_tools",
+        arguments: { tier: "full" },
+      }) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+
+      const text = result.content?.map((c) => c.text ?? "").join("\n") ?? "";
+      expect(result.isError ?? false).toBe(false);
+      // Governance tools are not registered at the default tier, but list_tools
+      // still advertises them — so they must still carry a description.
+      expect(text).toContain("consolidate_memories");
+      expect(text).not.toContain("(no description)");
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }, 30_000);
 });

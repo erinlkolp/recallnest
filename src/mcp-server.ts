@@ -204,12 +204,15 @@ function registerTool<Args extends ZodRawShape>(
   schema: Args,
   handler: ToolCallback<Args>,
 ): void {
+  // Record the description before the tier gate: list_tools --tier=full
+  // advertises tools this tier skipped, and they still need a one-liner.
+  TOOL_DESCRIPTIONS.set(name, description);
+
   if (!shouldRegisterTool(name)) {
     // stdout is reserved for MCP JSON-RPC on stdio transports.
     console.error(`[MCP] Skipping ${name} (tier: ${TOOL_TIERS[name]})`);
     return;
   }
-  TOOL_DESCRIPTIONS.set(name, description);
   server.tool(name, description, schema, handler);
 }
 
