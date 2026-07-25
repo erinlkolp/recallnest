@@ -1459,6 +1459,9 @@ registerTool(
       `KG triples removed: ${result.kgTriplesRemoved ? "yes" : "no/N/A"}`,
       `Cascade demoted: ${result.cascadeResult.demotedCount} related memories`,
     ];
+    if (result.pinsRemoved > 0) {
+      lines.push(`Pins removed: ${result.pinsRemoved}`);
+    }
     if (result.evidence?.reason) {
       lines.push(`Reason: ${result.evidence.reason}`);
     }

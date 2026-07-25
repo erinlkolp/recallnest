@@ -1,6 +1,6 @@
 import type { PinAsset } from "./memory-assets.js";
 import { extractBoundaryMetadata, extractCanonicalKey } from "./memory-boundaries.js";
-import { buildProjectScopeCueTerms, normalizeScopedValue } from "./context-composer-scope.js";
+import { normalizeScopedValue } from "./context-composer-scope.js";
 import { cleanText, dedupeText, stripConversationMarkers } from "./context-composer-text.js";
 import {
   TASK_CUE_EXTRACTION_LIMIT,
@@ -132,11 +132,12 @@ function isRelevantToScopedPinnedContext(asset: PinAsset, scope?: string): boole
   const assetIsProject = assetScope.startsWith("project:");
   if (!requestIsProject || !assetIsProject) return true;
 
-  const cueTerms = buildProjectScopeCueTerms(scope);
-  if (cueTerms.length === 0) return false;
-
-  const haystack = normalizeText(stripConversationMarkers(`${asset.title} ${asset.summary} ${asset.tags.join(" ")}`));
-  return cueTerms.some((term) => haystack.includes(term));
+  // Two different project scopes are disjoint. Cue-term matching used to
+  // bridge them, but the cue for "project:recallnest" is just "recallnest",
+  // which substring-matches sibling scopes like "project:recallnest-smoke"
+  // and any pin whose text merely names the project — so throwaway pins from
+  // one project leaked into another project's startup context.
+  return false;
 }
 
 export function selectPinnedContext(

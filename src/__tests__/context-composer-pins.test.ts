@@ -45,6 +45,61 @@ describe("context composer pins", () => {
     expect(pinnedContext[0]).toContain("Pinned: Eval runner isolation note: Fresh-window replay still needs explicit runner isolation to avoid shared component skew.");
   });
 
+  it("does not leak a pin from a sibling project scope into another project scope", () => {
+    // Regression: isRelevantToScopedPinnedContext fell back to substring cue
+    // matching whenever two *different* project scopes were compared. The cue
+    // term for "project:recallnest" is "recallnest", which is a substring of
+    // "project:recallnest-smoke" and of any pin text mentioning the project —
+    // so a throwaway smoke-test pin surfaced as top stable context for the
+    // real project.
+    const pinnedContext = selectPinnedContext([
+      buildPinnedAsset({
+        id: "pin-smoke",
+        title: "Smoke pin: deploy pipeline",
+        summary: "RecallNest deploys run bun test, then tsc --noEmit, then publish to origin only.",
+        tags: ["smoke", "deploy"],
+        source: {
+          memoryId: "memory-smoke",
+          scope: "project:recallnest-smoke",
+          timestamp: Date.parse("2026-07-25T00:00:00.000Z"),
+          metadata: {},
+        },
+      }),
+    ], {
+      // A task seed is what gives the foreign pin a positive score: without
+      // one every pin scores 0 and is dropped by the score filter, so the
+      // scope check never runs.
+      taskSeed: "RecallNest deploy pipeline check",
+      scope: "project:recallnest",
+      limit: 3,
+    });
+
+    expect(pinnedContext).toEqual([]);
+  });
+
+  it("still surfaces a pin whose scope matches the requested project scope", () => {
+    const pinnedContext = selectPinnedContext([
+      buildPinnedAsset({
+        id: "pin-real",
+        title: "Deploy pipeline",
+        summary: "RecallNest deploys run bun test, then tsc --noEmit, then publish to origin only.",
+        tags: ["deploy"],
+        source: {
+          memoryId: "memory-real",
+          scope: "project:recallnest",
+          timestamp: Date.parse("2026-07-25T00:00:00.000Z"),
+          metadata: {},
+        },
+      }),
+    ], {
+      scope: "project:recallnest",
+      limit: 3,
+    });
+
+    expect(pinnedContext).toHaveLength(1);
+    expect(pinnedContext[0]).toContain("Deploy pipeline");
+  });
+
   it("ignores conversational continuation filler for vague memory-layer prompts", () => {
     const pinnedContext = selectPinnedContext([
       buildPinnedAsset({

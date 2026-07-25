@@ -10,11 +10,14 @@
  * 2. Privacy tier check (durable requires explicit confirm)
  * 3. Evidence export (snapshot before deletion for audit trail)
  * 4. KG triple cleanup (via KGStore.deleteBySource)
- * 5. Pin archive (mark related pins as forgotten)
+ * 5. Pin cascade (delete derived pin assets and their indexed entries)
  * 6. Cascade demote (related memories via cascade-forget.ts)
- * 7. Primary delete (remove from LanceDB)
- * 8. Audit log (record the forget operation)
+ * 7. Evolution breadcrumb (mark status before delete)
+ * 8. Primary delete (remove from LanceDB)
+ * 9. Audit log (record the forget operation)
  */
+
+import { rmSync } from "node:fs";
 
 import type { MemoryStore, MemoryEntry } from "./store.js";
 import type { KGStore } from "./kg-store.js";
@@ -22,6 +25,10 @@ import type { AuditLogger } from "./audit-log.js";
 import { parsePrivacyTier, type PrivacyTier } from "./memory-schema.js";
 import { parseEvolution, patchEvolution } from "./memory-evolution.js";
 import { cascadeForget, type CascadeForgetConfig, DEFAULT_CASCADE_FORGET_CONFIG } from "./cascade-forget.js";
+import { listPinAssets, type PinAsset } from "./memory-assets.js";
+
+/** Upper bound on pin files scanned when looking for derived pins to remove. */
+const PIN_SCAN_LIMIT = 500;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,15 +69,30 @@ export interface ForgetResult {
   kgTriplesRemoved: boolean;
   /** Cascade demote results */
   cascadeResult: { demotedCount: number; demotedIds: string[] };
+  /** Number of derived pin assets removed */
+  pinsRemoved: number;
   /** Error message if failed */
   error?: string;
 }
+
+/** Pin asset access, injectable so the cascade can be tested without disk I/O. */
+export interface PinAssetAccess {
+  list: (limit?: number) => Array<PinAsset & { path: string }>;
+  remove: (path: string) => void;
+}
+
+const DISK_PIN_ASSETS: PinAssetAccess = {
+  list: (limit = PIN_SCAN_LIMIT) => listPinAssets(limit),
+  remove: (path: string) => rmSync(path, { force: true }),
+};
 
 export interface ForgetByIdDeps {
   store: MemoryStore;
   kgStore?: KGStore | null;
   auditLogger?: AuditLogger | null;
   cascadeConfig?: CascadeForgetConfig;
+  /** Defaults to the on-disk pin store. */
+  pinAssets?: PinAssetAccess;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +104,7 @@ export async function forgetMemory(
   request: ForgetRequest,
 ): Promise<ForgetResult> {
   const { store, kgStore, auditLogger, cascadeConfig } = deps;
+  const pinAssets = deps.pinAssets ?? DISK_PIN_ASSETS;
   const { memoryId, confirm, reason, scopeFilter } = request;
 
   // 1. Fetch target
@@ -92,6 +115,7 @@ export async function forgetMemory(
       memoryId,
       kgTriplesRemoved: false,
       cascadeResult: { demotedCount: 0, demotedIds: [] },
+      pinsRemoved: 0,
       error: `Memory ${memoryId} not found`,
     };
   }
@@ -104,6 +128,7 @@ export async function forgetMemory(
       memoryId: entry.id,
       kgTriplesRemoved: false,
       cascadeResult: { demotedCount: 0, demotedIds: [] },
+      pinsRemoved: 0,
       error: `Memory ${entry.id} has privacy tier "durable" — set confirm=true to proceed`,
     };
   }
@@ -129,7 +154,24 @@ export async function forgetMemory(
     }
   }
 
-  // 5. Cascade demote (related memories get importance reduction)
+  // 5. Pin cascade — a pin is a derived copy of the memory. Leaving it behind
+  // keeps the forgotten text surfacing through the pinned-context path, so
+  // remove both the asset file and the `asset:*` entry that indexes it.
+  let pinsRemoved = 0;
+  try {
+    const derivedPins = pinAssets.list(PIN_SCAN_LIMIT)
+      .filter((pin) => pin.source.memoryId === entry.id);
+    for (const pin of derivedPins) {
+      // indexAsset() files pinned assets under scope `asset:<first 8 of pin id>`
+      await store.bulkDelete([`asset:${pin.id.slice(0, 8)}`]);
+      pinAssets.remove(pin.path);
+      pinsRemoved++;
+    }
+  } catch (err) {
+    console.error("[recallnest] Pin cascade failed during forget:", err instanceof Error ? err.message : String(err));
+  }
+
+  // 6. Cascade demote (related memories get importance reduction)
   let cascadeResult = { demotedCount: 0, demotedIds: [] as string[] };
   try {
     cascadeResult = await cascadeForget(
@@ -141,7 +183,7 @@ export async function forgetMemory(
     console.error("[recallnest] Cascade demote failed during forget:", err instanceof Error ? err.message : String(err));
   }
 
-  // 6. Mark evolution status as "forgotten" before delete (audit breadcrumb)
+  // 7. Mark evolution status as "forgotten" before delete (audit breadcrumb)
   try {
     const patchedMetadata = patchEvolution(entry.metadata, {
       status: "archived" as any,
@@ -152,7 +194,7 @@ export async function forgetMemory(
     console.error("[recallnest] Evolution patch failed during forget:", err instanceof Error ? err.message : String(err));
   }
 
-  // 7. Primary delete
+  // 8. Primary delete
   try {
     await store.delete(entry.id, scopeFilter);
   } catch (err) {
@@ -162,11 +204,12 @@ export async function forgetMemory(
       evidence,
       kgTriplesRemoved,
       cascadeResult,
+      pinsRemoved,
       error: `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
-  // 8. Audit log
+  // 9. Audit log
   try {
     auditLogger?.log({
       operation: "forget",
@@ -194,6 +237,7 @@ export async function forgetMemory(
     evidence,
     kgTriplesRemoved,
     cascadeResult,
+    pinsRemoved,
   };
 }
 
