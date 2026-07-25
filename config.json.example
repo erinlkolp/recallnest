@@ -1,6 +1,6 @@
 {
   "dbPath": "~/.recallnest/data/lancedb",
-  "recallMode": "summary",
+  "recallMode": "full",
   "embedding": {
     "provider": "jina",
     "apiKey": "${JINA_API_KEY}",
