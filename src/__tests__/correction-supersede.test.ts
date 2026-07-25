@@ -81,6 +81,30 @@ describe("linkCorrectionSupersessions", () => {
     expect(parseEvolution(store.data.get("other-1")!.metadata, 0).status).toBe("active");
   });
 
+  it("does not supersede memories that merely share a project noun", async () => {
+    // Regression: found by the PR 31 smoke test. A correction about the release
+    // schedule superseded two unrelated fixtures because the heuristic's
+    // shared-term guard accepted a single common word ("recallnest"), and
+    // nothing here gates on topical similarity the way memory_lint does.
+    const correction =
+      "Actually that's wrong, correction: the RecallNest release train does not ship every Friday afternoon. We never ship on Friday. Remember that it ships Tuesday morning instead.";
+    const store = createStore([
+      { id: "old-1", text: "Remember that the RecallNest release train ships every Friday afternoon." },
+      { id: "jina", text: "RecallNest smoke fixture: Jina v5 is the pinned embedding model and must not be swapped." },
+      { id: "lance", text: "RecallNest smoke fixture: LanceDB is the only vector store permitted in this project." },
+      { id: "fix-1", text: correction },
+    ]);
+
+    const links = await linkCorrectionSupersessions(
+      { store: store as never },
+      { scope: SCOPE, corrections: [{ id: "fix-1", text: correction }] },
+    );
+
+    expect(links).toEqual([{ correctionId: "fix-1", supersededId: "old-1" }]);
+    expect(parseEvolution(store.data.get("jina")!.metadata, 0).status).toBe("active");
+    expect(parseEvolution(store.data.get("lance")!.metadata, 0).status).toBe("active");
+  });
+
   it("never supersedes the correction itself", async () => {
     const store = createStore([
       { id: "fix-1", text: "Correction - Thursdays, not Tuesdays for the deploy window" },

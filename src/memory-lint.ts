@@ -45,7 +45,12 @@ export interface MemoryLintReport {
 }
 
 export interface LintDeps {
-  store: Pick<MemoryStore, "list">;
+  /**
+   * `getById` is optional but strongly wanted: `list()` omits vectors for
+   * performance, and the contradiction/duplicate checks both pre-filter on
+   * vector similarity. Without it those checks cannot see a similarity signal.
+   */
+  store: Pick<MemoryStore, "list"> & Partial<Pick<MemoryStore, "getById">>;
   scope?: string;
   verbose?: boolean;
 }
@@ -175,6 +180,46 @@ function groupByScope(entries: MemoryEntry[]): Map<string, MemoryEntry[]> {
   }
 
   return groups;
+}
+
+/**
+ * Refill the vectors `list()` dropped, for the entries that actually get
+ * compared.
+ *
+ * `MemoryStore.list()` returns `vector: []` by design (it selects without the
+ * vector column), so every pair scored 0 similarity and both the contradiction
+ * and duplicate pre-filters rejected everything — the checks were inert against
+ * a real store and only ever passed on unit fixtures that carried vectors.
+ *
+ * Hydration is limited to the capped comparison groups, so the extra reads are
+ * bounded by scopes x MAX_ENTRIES_PER_SCOPE rather than the full 10k scan.
+ */
+async function hydrateComparisonVectors(
+  store: LintDeps["store"],
+  entries: MemoryEntry[],
+): Promise<MemoryEntry[]> {
+  const getById = store.getById?.bind(store);
+  if (!getById) return entries;
+
+  const needed = new Set<string>();
+  for (const [, group] of groupByScope(entries)) {
+    if (group.length < 2) continue;
+    for (const entry of group) {
+      if (entry.vector.length === 0) needed.add(entry.id);
+    }
+  }
+  if (needed.size === 0) return entries;
+
+  const hydrated = new Map<string, number[]>();
+  for (const id of needed) {
+    const full = await getById(id);
+    if (full?.vector.length) hydrated.set(id, full.vector);
+  }
+
+  return entries.map((entry) => {
+    const vector = hydrated.get(entry.id);
+    return vector ? { ...entry, vector } : entry;
+  });
 }
 
 function findContradictions(entries: MemoryEntry[]): LintFinding[] {
@@ -347,7 +392,8 @@ export async function runMemoryLint(deps: LintDeps): Promise<MemoryLintReport> {
   const allEntries = await deps.store.list(scopeFilter, undefined, 10000, 0);
 
   // Filter to active entries only
-  const entries = allEntries.filter(e => isActiveMemory(e.metadata));
+  const active = allEntries.filter(e => isActiveMemory(e.metadata));
+  const entries = await hydrateComparisonVectors(deps.store, active);
 
   // Run all checks
   const contradictions = findContradictions(entries);
