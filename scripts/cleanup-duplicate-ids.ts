@@ -3,10 +3,14 @@
  *
  * LanceDB does not enforce a primary key, so an append can land a second row
  * with an id that already exists. Once that happens the duplicate is
- * self-perpetuating: store.ts update() uses
- * `.mergeInsert("id").whenMatchedUpdateAll()` (store.ts:1029), which updates
- * *every* matching row rather than collapsing them, so ordinary writes never
- * heal it. This is the data-side repair.
+ * self-perpetuating: every write path uses
+ * `.mergeInsert("id").whenMatchedUpdateAll()`, which updates *every* matching
+ * row rather than collapsing them, so ordinary writes never heal it. This is
+ * the data-side repair.
+ *
+ * The write paths no longer create duplicates (store.ts store/storeBatch/
+ * importEntry upsert on id), so this script is for cleaning up rows that
+ * predate that fix, or that a script wrote via delete + re-add.
  *
  * This is NOT the same job as scripts/cleanup-step1-exact-dups.ts. That script
  * groups by identical text and keeps the oldest / most-accessed copy. Same-id

@@ -412,7 +412,17 @@ export class MemoryStore {
     }
 
     try {
-      await this.table!.add([fullEntry] as unknown as Record<string, unknown>[]);
+      // Upsert, never append. Ids are deterministic — and capture-engine
+      // derives them from canonicalKey rather than text (capture-engine.ts:595)
+      // — so a corrected re-store arrives with an id that already exists. A
+      // plain add() would leave two rows sharing that id, which nothing can
+      // repair afterwards: update() matches every duplicate copy and rewrites
+      // them all. See scripts/cleanup-duplicate-ids.ts.
+      await this.table!
+        .mergeInsert("id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute([fullEntry] as unknown as Record<string, unknown>[]);
     } catch (err: any) {
       const code = err.code || "";
       const message = err.message || String(err);
@@ -450,8 +460,17 @@ export class MemoryStore {
       return e;
     });
 
+    // Two entries in one batch can collapse onto the same deterministic id.
+    // mergeInsert cannot resolve that — the payload itself would be ambiguous
+    // — so fold them here first, last write wins.
+    const dedupedEntries = [...new Map(enrichedEntries.map(e => [e.id, e])).values()];
+
     try {
-      await this.table!.add(enrichedEntries as unknown as Record<string, unknown>[]);
+      await this.table!
+        .mergeInsert("id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(dedupedEntries as unknown as Record<string, unknown>[]);
     } catch (err: any) {
       const code = err.code || "";
       const message = err.message || String(err);
@@ -459,7 +478,7 @@ export class MemoryStore {
         `Failed to batch store ${entries.length} memories in "${this.config.dbPath}": ${code} ${message}`
       );
     }
-    return fullEntries.length;
+    return dedupedEntries.length;
   }
 
   /**
@@ -503,7 +522,13 @@ export class MemoryStore {
       }
     } catch { /* malformed metadata — skip backfill */ }
 
-    await this.table!.add([full] as unknown as Record<string, unknown>[]);
+    // Upsert so re-embedding or re-running a migration over the same source
+    // is idempotent rather than doubling every row it touches.
+    await this.table!
+      .mergeInsert("id")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute([full] as unknown as Record<string, unknown>[]);
     return full;
   }
 
