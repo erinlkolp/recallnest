@@ -47,6 +47,13 @@ export const CollapsedItemSchema = z.object({
   stalenessHint: z.string().optional(),
 });
 
+/**
+ * CC-7: Upper bound on the mixed-granularity collapsed view. The composer must
+ * truncate to this before building a response, since it gathers across several
+ * result sections and can otherwise overflow the schema.
+ */
+export const MAX_COLLAPSED_ITEMS = 20;
+
 /** CC-8: Essential context reconstructed after compact — pinned memories, active patterns, open loops. */
 export const EssentialContextSchema = z.object({
   pinnedMemories: z.array(z.string()).max(3).optional(),
@@ -61,7 +68,7 @@ export const ResumeContextResponseSchema = z.object({
   relevantPatterns: normalizedStringListSchema("relevantPatterns", 6, 220),
   recentCases: normalizedStringListSchema("recentCases", 6, 220),
   /** CC-7: Mixed-granularity collapsed view of all recalled items. */
-  collapsedItems: z.array(CollapsedItemSchema).max(20).optional(),
+  collapsedItems: z.array(CollapsedItemSchema).max(MAX_COLLAPSED_ITEMS).optional(),
   /** CC-8: Essential context reconstructed after compact. */
   essentialContext: EssentialContextSchema.optional(),
   latestCheckpoint: ResumeCheckpointSummarySchema.optional(),

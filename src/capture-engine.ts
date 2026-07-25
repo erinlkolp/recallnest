@@ -31,7 +31,7 @@ import {
 import { deterministicId, type MemoryEntry, type MemoryStore } from "./store.js";
 import {
   buildDefaultCanonicalKey,
-  buildStructuredMemoryBoundary,
+  resolveStructuredWriteBoundary,
   extractBoundaryMetadata,
   extractCanonicalKey,
   extractPromotedFrom,
@@ -164,7 +164,10 @@ function buildStructuredMetadata(params: {
     source: params.source,
     tags: params.tags,
     capture: params.capture,
-    boundary: buildStructuredMemoryBoundary(params.category),
+    boundary: resolveStructuredWriteBoundary({
+      source: params.source,
+      category: params.category,
+    }),
     canonicalKey: params.canonicalKey,
     evolution: defaultEvolution(),
     ...params.extra,

@@ -103,6 +103,7 @@ export async function setReminder(
     scope: params.scope,
     importance: 0.75,
     metadata: JSON.stringify({
+      source: "set_reminder",
       prospective,
       tier: "working",
       boundary: { layer: "durable", authority: "user" },

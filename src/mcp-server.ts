@@ -94,6 +94,7 @@ import { indexAsset, indexPinnedAsset } from "./asset-sync.js";
 import { createComponentResolver, loadConfig, loadDotEnv, resolveRecallMode } from "./runtime-config.js";
 import { DurableMemoryCategorySchema, StoreMemorySourceSchema, PrivacyTierSchema, isPredictiveMemoryEnabled } from "./memory-schema.js";
 import { persistCaseMemory, persistMemory, persistMemoryBatch, persistWorkflowPattern, promoteMemory } from "./capture-engine.js";
+import { linkCorrectionSupersessions } from "./correction-supersede.js";
 import { persistSkill, retrieveSkills } from "./skill-engine.js";
 import { SkillImplementationTypeSchema } from "./skill-schema.js";
 import { scanForPromotions, formatPromotionResult } from "./skill-promotion.js";
@@ -203,12 +204,15 @@ function registerTool<Args extends ZodRawShape>(
   schema: Args,
   handler: ToolCallback<Args>,
 ): void {
+  // Record the description before the tier gate: list_tools --tier=full
+  // advertises tools this tier skipped, and they still need a one-liner.
+  TOOL_DESCRIPTIONS.set(name, description);
+
   if (!shouldRegisterTool(name)) {
     // stdout is reserved for MCP JSON-RPC on stdio transports.
     console.error(`[MCP] Skipping ${name} (tier: ${TOOL_TIERS[name]})`);
     return;
   }
-  TOOL_DESCRIPTIONS.set(name, description);
   server.tool(name, description, schema, handler);
 }
 
@@ -484,10 +488,25 @@ registerTool(
       })),
     });
 
+    // A correction and the fact it corrects are captured as two separate
+    // memories (different categories, same importance). Link them so the
+    // corrected fact stops competing with its own correction at retrieval time.
+    const corrections = stored
+      .map((record, index) => ({ record, item: result.items[index] }))
+      .filter(({ record, item }) =>
+        item?.sourceContext === "correction signal" && record.disposition !== "rejected")
+      .map(({ record }) => ({ id: record.id, text: record.text }));
+
+    const supersessions = await linkCorrectionSupersessions({ store }, { scope, corrections });
+
     const lines = stored.map((r, i) => {
       const item = result.items[i];
       return `${i + 1}. [${item.sourceContext}] ${r.disposition} → ${r.category} (${r.id.slice(0, 8)})`;
     });
+
+    const supersessionLines = supersessions.map(
+      (link) => `  ${link.correctionId.slice(0, 8)} supersedes ${link.supersededId.slice(0, 8)}`,
+    );
 
     return {
       content: [{
@@ -495,6 +514,9 @@ registerTool(
         text: [
           `Auto-captured ${stored.length} item(s) from ${result.items.length} signal(s):`,
           ...lines,
+          ...(supersessionLines.length > 0
+            ? [`Superseded ${supersessions.length} contradicted memor${supersessions.length === 1 ? "y" : "ies"}:`, ...supersessionLines]
+            : []),
           `Scope: ${scope}`,
         ].join("\n"),
       }],

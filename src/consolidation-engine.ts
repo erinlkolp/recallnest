@@ -77,6 +77,64 @@ function canonicalScore(entry: MemoryEntry): number {
   return entry.importance * (1 + Math.log(evo.accessCount + 1));
 }
 
+/**
+ * Function words and polarity markers that carry no topic. These are exactly
+ * the tokens the negation patterns key on, plus common filler, so they must not
+ * also count as evidence that two texts are *about* the same thing.
+ */
+const CONTRADICTION_STOPWORDS = new Set([
+  "actually", "about", "after", "again", "also", "always", "and", "another", "any", "anything",
+  "are", "back", "because", "been", "before", "being", "both", "but", "came", "come", "correction",
+  "could", "did", "does", "doing", "done", "down", "during", "each", "else", "elsewhere", "even",
+  "ever", "every", "everything", "from", "further", "get", "gets", "getting", "give", "going",
+  "gone", "got", "had", "has", "have", "having", "her", "here", "hers", "him", "his", "how",
+  "however", "instead", "into", "its", "itself", "just", "keep", "kept", "let", "like", "made",
+  "make", "makes", "many", "may", "maybe", "might", "more", "most", "much", "must", "never",
+  "next", "not", "now", "off", "once", "one", "only", "onto", "other", "others", "our", "ours",
+  "out", "over", "own", "per", "please", "put", "quite", "rather", "really", "remember", "said",
+  "same", "say", "says", "see", "seen", "set", "shall", "she", "should", "significant", "since",
+  "some", "something", "still", "such", "sure", "take", "taken", "than", "that", "thats", "the",
+  "their", "theirs", "them", "themselves", "then", "there", "these", "they", "thing", "things",
+  "this", "those", "though", "through", "thus", "too", "under", "until", "upon", "use", "used",
+  "uses", "using", "very", "want", "wants", "was", "way", "ways", "were", "what", "when", "where",
+  "whether", "which", "while", "who", "why", "will", "with", "within", "without", "would", "wrong",
+  "yet", "you", "your", "yours",
+]);
+
+/**
+ * Minimum shared content words before a negation match counts as a
+ * contradiction. One shared word is not evidence of a shared topic: inside a
+ * project scope nearly every memory repeats the project name, so a single
+ * overlap flagged unrelated pairs (a release-schedule correction "contradicting"
+ * a note about the embedding model).
+ */
+const MIN_SHARED_CONTENT_WORDS = 2;
+
+/**
+ * Minimum Jaccard overlap of content words. A contradiction is a near-restatement
+ * with flipped polarity ("X is Y" / "X is not Y"), so the two texts should be
+ * mostly *the same words*. A raw shared-word count cannot express that: two long
+ * multi-fact notes about one project clear any fixed count while overlapping
+ * barely at all, which is how a whole scope of unrelated notes read as
+ * contradictory once the similarity pre-filter started working.
+ *
+ * Measured separation on real data: genuine contradictions score 0.43-1.00,
+ * same-project non-contradictions 0.00-0.07.
+ */
+const MIN_CONTENT_OVERLAP_RATIO = 0.35;
+
+/** Topic-bearing tokens: punctuation stripped, function words removed. */
+function contentWords(text: string): Set<string> {
+  const words = new Set<string>();
+  for (const raw of text.split(/\s+/)) {
+    const word = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    if (word.length < 3) continue;
+    if (CONTRADICTION_STOPWORDS.has(word)) continue;
+    words.add(word);
+  }
+  return words;
+}
+
 /** Simple heuristic contradiction: negation pattern check between two texts. */
 export function detectHeuristicContradiction(textA: string, textB: string): boolean {
   const a = textA.toLowerCase();
@@ -93,12 +151,19 @@ export function detectHeuristicContradiction(textA: string, textB: string): bool
 
   for (const [negRe, posRe] of negationPairs) {
     if ((negRe.test(a) && posRe.test(b)) || (negRe.test(b) && posRe.test(a))) {
-      // Check they share at least one significant term (to avoid false positives)
-      const wordsA = new Set(a.split(/\s+/).filter(w => w.length > 3));
-      const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 3));
+      // Require the texts to be near-restatements of each other, not merely to
+      // mention the same project — the negation match alone is far too easy to
+      // satisfy, especially for long multi-fact notes.
+      const wordsA = contentWords(a);
+      const wordsB = contentWords(b);
+      let shared = 0;
       for (const w of wordsA) {
-        if (wordsB.has(w)) return true;
+        if (wordsB.has(w)) shared += 1;
       }
+      if (shared < MIN_SHARED_CONTENT_WORDS) continue;
+
+      const union = wordsA.size + wordsB.size - shared;
+      if (union > 0 && shared / union >= MIN_CONTENT_OVERLAP_RATIO) return true;
     }
   }
   return false;

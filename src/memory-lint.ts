@@ -16,6 +16,7 @@
 import type { MemoryEntry, MemoryStore } from "./store.js";
 import { cosineSimilarity } from "./multi-vector.js";
 import { parseEvolution, isActiveMemory } from "./memory-evolution.js";
+import { detectHeuristicContradiction } from "./consolidation-engine.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,7 +45,12 @@ export interface MemoryLintReport {
 }
 
 export interface LintDeps {
-  store: Pick<MemoryStore, "list">;
+  /**
+   * `getById` is optional but strongly wanted: `list()` omits vectors for
+   * performance, and the contradiction/duplicate checks both pre-filter on
+   * vector similarity. Without it those checks cannot see a similarity signal.
+   */
+  store: Pick<MemoryStore, "list"> & Partial<Pick<MemoryStore, "getById">>;
   scope?: string;
   verbose?: boolean;
 }
@@ -67,50 +73,31 @@ const DUPLICATE_THRESHOLD = 0.92;
 const CONTRADICTION_SIMILARITY_FLOOR = 0.45;
 
 /**
- * Categories where contradictions are meaningful.
+ * Categories that can anchor a contradiction on their own.
  * Append-only categories (events, cases) naturally contain "opposite" entries
- * from different points in time — those are not contradictions.
+ * from different points in time — a pair of those is a timeline, not a conflict.
  */
-const CONTRADICTION_CATEGORIES = new Set(["profile", "preferences", "entities", "patterns"]);
+const CONTRADICTION_ANCHOR_CATEGORIES = new Set(["profile", "preferences", "entities", "patterns"]);
+
+/**
+ * Tag auto_capture stamps on a correction signal. A correction is the one
+ * append-only entry that *does* invalidate what it contradicts, so it anchors a
+ * contradiction even when both sides are events/cases.
+ */
+const CORRECTION_TAG = "auto-capture:correction-signal";
+
+/**
+ * Per-scope cap for contradiction scanning. Contradictions group by scope alone
+ * (a fact and its correction routinely land in different categories), so this
+ * cap spans every category in the scope and is set higher than the per-group
+ * cap used by the category-scoped checks.
+ */
+const MAX_ENTRIES_PER_SCOPE = 200;
 
 /** Entries not accessed in this many days are candidates for staleness. */
 const STALE_DAYS = 90;
 
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000;
-
-// ---------------------------------------------------------------------------
-// Contradiction Detection (inline copy from consolidation-engine.ts)
-// ---------------------------------------------------------------------------
-
-/**
- * Heuristic contradiction detection between two memory texts.
- * Checks for negation patterns and requires at least one shared significant
- * term to reduce false positives.
- */
-function detectContradiction(textA: string, textB: string): boolean {
-  const a = textA.toLowerCase();
-  const b = textB.toLowerCase();
-
-  const negationPairs: [RegExp, RegExp][] = [
-    [/\bnot\b/, /\b(?:always|must|should|is|are|was|were)\b/],
-    [/\bnever\b/, /\b(?:always|every|each)\b/],
-    [/\bdisable/, /\benable/],
-    [/不要|不用|别/, /必须|一定|总是/],
-    [/从不/, /每次|总是|一直/],
-  ];
-
-  for (const [negRe, posRe] of negationPairs) {
-    if ((negRe.test(a) && posRe.test(b)) || (negRe.test(b) && posRe.test(a))) {
-      // Require at least one shared significant term to reduce false positives
-      const wordsA = new Set(a.split(/\s+/).filter(w => w.length > 3));
-      const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 3));
-      for (const w of wordsA) {
-        if (wordsB.has(w)) return true;
-      }
-    }
-  }
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -150,23 +137,107 @@ function groupEntries(entries: MemoryEntry[]): Map<string, MemoryEntry[]> {
 // Check 1: Contradictions
 // ---------------------------------------------------------------------------
 
+/** True when the entry carries auto_capture's correction-signal tag. */
+function isCorrection(entry: MemoryEntry): boolean {
+  try {
+    const parsed = JSON.parse(entry.metadata || "{}") as { tags?: unknown };
+    return Array.isArray(parsed.tags) && parsed.tags.includes(CORRECTION_TAG);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A pair is worth checking when at least one side can anchor a contradiction:
+ * a stable-category memory, or a correction. Two plain append-only entries are
+ * a timeline — "deployed v1 Monday" / "rolled back v1 Tuesday" — not a conflict.
+ */
+function canAnchorContradiction(entry: MemoryEntry): boolean {
+  return CONTRADICTION_ANCHOR_CATEGORIES.has(entry.category) || isCorrection(entry);
+}
+
+/**
+ * Group by scope alone, ignoring category. A fact and the correction that
+ * invalidates it routinely land in different categories (auto_capture files an
+ * explicit-memory instruction under events and its correction under cases), so
+ * grouping by scope+category made the two halves of a contradiction unreachable
+ * to each other.
+ */
+function groupByScope(entries: MemoryEntry[]): Map<string, MemoryEntry[]> {
+  const groups = new Map<string, MemoryEntry[]>();
+
+  for (const entry of entries) {
+    const key = entry.scope ?? "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(entry);
+  }
+
+  for (const [key, group] of groups) {
+    group.sort((a, b) => b.importance - a.importance);
+    if (group.length > MAX_ENTRIES_PER_SCOPE) {
+      groups.set(key, group.slice(0, MAX_ENTRIES_PER_SCOPE));
+    }
+  }
+
+  return groups;
+}
+
+/**
+ * Refill the vectors `list()` dropped, for the entries that actually get
+ * compared.
+ *
+ * `MemoryStore.list()` returns `vector: []` by design (it selects without the
+ * vector column), so every pair scored 0 similarity and both the contradiction
+ * and duplicate pre-filters rejected everything — the checks were inert against
+ * a real store and only ever passed on unit fixtures that carried vectors.
+ *
+ * Hydration is limited to the capped comparison groups, so the extra reads are
+ * bounded by scopes x MAX_ENTRIES_PER_SCOPE rather than the full 10k scan.
+ */
+async function hydrateComparisonVectors(
+  store: LintDeps["store"],
+  entries: MemoryEntry[],
+): Promise<MemoryEntry[]> {
+  const getById = store.getById?.bind(store);
+  if (!getById) return entries;
+
+  const needed = new Set<string>();
+  for (const [, group] of groupByScope(entries)) {
+    if (group.length < 2) continue;
+    for (const entry of group) {
+      if (entry.vector.length === 0) needed.add(entry.id);
+    }
+  }
+  if (needed.size === 0) return entries;
+
+  const hydrated = new Map<string, number[]>();
+  for (const id of needed) {
+    const full = await getById(id);
+    if (full?.vector.length) hydrated.set(id, full.vector);
+  }
+
+  return entries.map((entry) => {
+    const vector = hydrated.get(entry.id);
+    return vector ? { ...entry, vector } : entry;
+  });
+}
+
 function findContradictions(entries: MemoryEntry[]): LintFinding[] {
   const findings: LintFinding[] = [];
-
-  // Only check merge-type categories where contradictions are meaningful
-  const eligible = entries.filter(e => CONTRADICTION_CATEGORIES.has(e.category));
-  const groups = groupEntries(eligible);
+  const groups = groupByScope(entries);
 
   for (const [, group] of groups) {
     if (group.length < 2) continue;
 
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
+        if (!canAnchorContradiction(group[i]) && !canAnchorContradiction(group[j])) continue;
+
         // Pre-filter: entries must be about the same topic (moderate vector similarity)
         const sim = cosineSimilarity(group[i].vector, group[j].vector);
         if (sim < CONTRADICTION_SIMILARITY_FLOOR) continue;
 
-        if (detectContradiction(group[i].text, group[j].text)) {
+        if (detectHeuristicContradiction(group[i].text, group[j].text)) {
           findings.push({
             check: "contradiction",
             severity: "warning",
@@ -321,7 +392,8 @@ export async function runMemoryLint(deps: LintDeps): Promise<MemoryLintReport> {
   const allEntries = await deps.store.list(scopeFilter, undefined, 10000, 0);
 
   // Filter to active entries only
-  const entries = allEntries.filter(e => isActiveMemory(e.metadata));
+  const active = allEntries.filter(e => isActiveMemory(e.metadata));
+  const entries = await hydrateComparisonVectors(deps.store, active);
 
   // Run all checks
   const contradictions = findContradictions(entries);

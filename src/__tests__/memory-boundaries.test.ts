@@ -8,9 +8,39 @@ import {
   extractPromotedFrom,
   extractProvenanceHistory,
   extractProvenanceHistoryCount,
+  isTranscriptIngestSource,
   resolveIngestBoundary,
+  resolveStructuredWriteBoundary,
   shouldUseStableMemoryResult,
 } from "../memory-boundaries.js";
+
+describe("resolveStructuredWriteBoundary", () => {
+  it("treats conversation_import as a transcript ingest source", () => {
+    expect(isTranscriptIngestSource("conversation_import")).toBe(true);
+  });
+
+  it("marks conversation_import writes as transcript evidence", () => {
+    const boundary = resolveStructuredWriteBoundary({
+      source: "conversation_import",
+      category: "events",
+    });
+
+    expect(boundary.layer).toBe("evidence");
+    expect(boundary.authority).toBe("transcript-ingest");
+    expect(boundary.conflictPolicy).toBe("append-only");
+    expect(boundary.originalCategory).toBe("events");
+  });
+
+  it("keeps curated structured writes durable", () => {
+    const boundary = resolveStructuredWriteBoundary({
+      source: "manual",
+      category: "preferences",
+    });
+
+    expect(boundary.layer).toBe("durable");
+    expect(boundary.authority).toBe("structured-memory");
+  });
+});
 
 describe("memory boundaries", () => {
   it("downgrades transcript-derived profile facts into evidence events", () => {

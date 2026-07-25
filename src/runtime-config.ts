@@ -173,7 +173,12 @@ export function createComponentResolver(config: LocalMemoryConfig) {
 const VALID_RECALL_MODES: RecallMode[] = ["full", "light", "summary", "off"];
 
 /**
- * Resolve effective recall mode: per-call override > env var > config > default ("summary").
+ * Resolve effective recall mode: per-call override > env var > config > default ("full").
+ *
+ * The default is "full" to match the resume_context tool contract: a fresh
+ * window is meant to recover durable memory, patterns, and cases, not just the
+ * latest checkpoint. Set config.recallMode or RECALLNEST_RECALL_MODE to trade
+ * recall depth for startup tokens.
  */
 export function resolveRecallMode(config: LocalMemoryConfig, perCallOverride?: string): RecallMode {
   if (perCallOverride && VALID_RECALL_MODES.includes(perCallOverride as RecallMode)) {
@@ -183,5 +188,5 @@ export function resolveRecallMode(config: LocalMemoryConfig, perCallOverride?: s
   if (envMode && VALID_RECALL_MODES.includes(envMode as RecallMode)) {
     return envMode as RecallMode;
   }
-  return config.recallMode ?? "summary";
+  return config.recallMode ?? "full";
 }

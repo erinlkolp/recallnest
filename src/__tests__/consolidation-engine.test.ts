@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { ConsolidationEngine, DEFAULT_CONSOLIDATION_CONFIG, formatConsolidationResult, type ConsolidationResult } from "../consolidation-engine.js";
+import { ConsolidationEngine, DEFAULT_CONSOLIDATION_CONFIG, detectHeuristicContradiction, formatConsolidationResult, type ConsolidationResult } from "../consolidation-engine.js";
 import type { MemoryEntry, MemorySearchResult } from "../store.js";
 
 function makeEntry(overrides: Partial<MemoryEntry> & { id: string; text: string }): MemoryEntry {
@@ -177,5 +177,54 @@ describe("formatConsolidationResult", () => {
     expect(text).toContain("Clusters found: 5");
     expect(text).toContain("Merged (versioned): 3");
     expect(text).toContain("Conflicts:");
+  });
+});
+
+describe("detectHeuristicContradiction", () => {
+  it("flags a genuine negated restatement of the same fact", () => {
+    expect(detectHeuristicContradiction(
+      "Remember that the RecallNest release train ships every Friday afternoon.",
+      "The RecallNest release train does not ship every Friday afternoon; we never ship on Friday.",
+    )).toBe(true);
+  });
+
+  it("flags short opposing directives about the same subject", () => {
+    expect(detectHeuristicContradiction(
+      "Always use Bun for scripts",
+      "Never use Bun for scripts",
+    )).toBe(true);
+  });
+
+  it("does not flag entries that share only one incidental word", () => {
+    // Regression: a single shared token >3 chars used to be enough, so any two
+    // memories in a project scope that both mentioned the project name (or a
+    // filler word like "every") were reported as contradicting each other.
+    expect(detectHeuristicContradiction(
+      "Actually that's wrong, correction: the RecallNest release train does not ship every Friday afternoon.",
+      "RecallNest smoke fixture: Jina v5 is the pinned embedding model and must not be swapped.",
+    )).toBe(false);
+
+    expect(detectHeuristicContradiction(
+      "The RecallNest release train does not ship every Friday afternoon.",
+      "The Grafana dashboard for VU-Server is always refreshed every 30 seconds.",
+    )).toBe(false);
+  });
+
+  it("does not flag entries whose only content overlap is the project name", () => {
+    expect(detectHeuristicContradiction(
+      "This project must always run migrations first",
+      "This project should never expose the debug endpoint",
+    )).toBe(false);
+  });
+
+  it("does not flag two long notes about one project that merely differ in polarity", () => {
+    // Regression: with the similarity pre-filter repaired, memory_lint reported
+    // 76 contradictions across 92 real memories. Long multi-fact notes about the
+    // same project clear any fixed shared-word count while overlapping barely at
+    // all, so the gate has to be a *ratio*.
+    expect(detectHeuristicContradiction(
+      "How Erin likes engineering work on VU-Server (and generally): TDD for every change, small incremental commits, always run the full suite before pushing, never force-push shared branches, and prefer clarity over cleverness in review.",
+      "Workflow pattern: Clear GitHub Actions Node-runtime deprecation warnings. Use when a workflow is not passing lint. Steps: bump actions to node20, re-run, confirm the annotation is gone.",
+    )).toBe(false);
   });
 });

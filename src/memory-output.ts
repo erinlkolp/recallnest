@@ -67,8 +67,12 @@ function getDateLabel(timestamp: number): string {
 }
 
 function getSourceLabel(result: RetrievalResult): string {
+  // Never fall back to the scope: a scope answers "where does this live", not
+  // "where did this come from". Leaking it here renders scopes in the Source
+  // column and splits distill_memory's source map into per-scope buckets.
   const meta = parseMetadata(result.entry);
-  return String(meta.source || result.entry.scope || "?");
+  const source = typeof meta.source === "string" ? meta.source.trim() : "";
+  return source || "unknown";
 }
 
 function getCategoryLabel(result: RetrievalResult): string {

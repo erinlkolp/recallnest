@@ -40,6 +40,18 @@ function createMockStore(entries: MemoryEntry[]): Pick<MemoryStore, "list"> {
   } as Pick<MemoryStore, "list">;
 }
 
+/**
+ * Mirrors the real store: MemoryStore.list() drops vectors for performance
+ * (`vector: []`), and only getById hydrates them. Lint fixtures that carry
+ * vectors straight off list() cannot catch a broken similarity gate.
+ */
+function createProductionShapeStore(entries: MemoryEntry[]) {
+  return {
+    async list() { return entries.map(e => ({ ...e, vector: [] })); },
+    async getById(id: string) { return entries.find(e => e.id === id) ?? null; },
+  } as Pick<MemoryStore, "list" | "getById">;
+}
+
 // ---------------------------------------------------------------------------
 // runMemoryLint
 // ---------------------------------------------------------------------------
@@ -73,6 +85,47 @@ describe("runMemoryLint", () => {
     expect(finding).toBeDefined();
     expect(finding!.memoryIds).toContain("c1");
     expect(finding!.memoryIds).toContain("c2");
+  });
+
+  it("detects a cross-category contradiction when list() omits vectors", async () => {
+    // Regression: found by the PR 31 smoke test. Both the contradiction and
+    // duplicate checks pre-filter on cosineSimilarity(entry.vector, ...), but
+    // the real store returns vector: [] from list(), so similarity was always 0
+    // and every pair was skipped — the checks never fired outside unit tests.
+    const entries = [
+      makeEntry({
+        id: "p1",
+        text: "The RecallNest deploy window is always Friday afternoon and deploys must go out then.",
+        scope: "project:x",
+        category: "preferences",
+        vector: [1, 0, 0, 0, 0],
+      }),
+      makeEntry({
+        id: "e1",
+        text: "We never deploy RecallNest on Friday afternoon; that deploy window was dropped.",
+        scope: "project:x",
+        category: "events",
+        vector: [0.98, 0.1, 0, 0, 0],
+      }),
+    ];
+    const report = await runMemoryLint({ store: createProductionShapeStore(entries) });
+
+    expect(report.summary.contradictions).toBeGreaterThanOrEqual(1);
+    const finding = report.findings.find(f => f.check === "contradiction");
+    expect(finding).toBeDefined();
+    expect(finding!.memoryIds).toContain("p1");
+    expect(finding!.memoryIds).toContain("e1");
+  });
+
+  it("detects duplicates when list() omits vectors", async () => {
+    const vec = [0.5, 0.5, 0.5, 0.5, 0.5];
+    const entries = [
+      makeEntry({ id: "d1", text: "Docker port is 4318", vector: vec, scope: "project:x", category: "entities" }),
+      makeEntry({ id: "d2", text: "Docker port is 4318 config", vector: vec, scope: "project:x", category: "entities" }),
+    ];
+    const report = await runMemoryLint({ store: createProductionShapeStore(entries) });
+
+    expect(report.summary.duplicates).toBeGreaterThanOrEqual(1);
   });
 
   it("detects duplicates by vector similarity", async () => {
@@ -267,5 +320,66 @@ describe("formatMemoryLintReport", () => {
     const output = formatMemoryLintReport(report);
     expect(output).toContain("Stale (10)");
     expect(output).toContain("10 memories not accessed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-category contradiction detection
+// ---------------------------------------------------------------------------
+
+describe("cross-category contradictions", () => {
+  function makeTagged(id: string, text: string, category: string, tags: string[]): MemoryEntry {
+    return makeEntry({
+      id,
+      text,
+      category,
+      vector: [1, 0.2, 0, 0, 0],
+      metadata: JSON.stringify({
+        tags,
+        evolution: { status: "active", accessCount: 0, lastAccessedAt: null },
+      }),
+    });
+  }
+
+  it("flags a correction that contradicts a fact stored in another category", async () => {
+    const entries = [
+      makeTagged(
+        "fact-1",
+        "Remember that the deploy window is Tuesdays",
+        "events",
+        ["auto-capture:explicit-memory-instruction"],
+      ),
+      makeTagged(
+        "fix-1",
+        "Correction - Thursdays, not Tuesdays for the deploy window",
+        "cases",
+        ["auto-capture:correction-signal"],
+      ),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(1);
+    expect(report.findings[0].memoryIds.sort()).toEqual(["fact-1", "fix-1"]);
+    expect(report.healthScore).toBeLessThan(100);
+  });
+
+  it("stays quiet on an append-only event timeline with no correction marker", async () => {
+    const entries = [
+      makeTagged("e1", "We deployed release v1 to production on Monday", "events", []),
+      makeTagged("e2", "We should never deploy release v1 again, always use v2", "events", []),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(0);
+  });
+
+  it("flags a stable-category memory contradicting an event", async () => {
+    const entries = [
+      makeTagged("p1", "The deploy window is always Tuesdays", "preferences", []),
+      makeTagged("e1", "The deploy window is not Tuesdays anymore", "events", []),
+    ];
+    const report = await runMemoryLint({ store: createMockStore(entries) });
+
+    expect(report.summary.contradictions).toBe(1);
   });
 });
