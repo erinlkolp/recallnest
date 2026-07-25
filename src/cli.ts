@@ -556,7 +556,15 @@ program
 
     const briefSeedResults = selectBriefSeedResults(results);
     const summary = summarizeResults(briefSeedResults, { query, profile: profile.name });
-    const asset = buildBriefAsset(summary, { title: options.title });
+    const asset = buildBriefAsset(summary, {
+      title: options.title,
+      scope: resolveScopeSelection({
+        scope: options.scope,
+        sessionId: options.sessionId,
+        allScopes: Boolean(options.allScopes),
+        operation: "cli:brief",
+      }).resolvedScope,
+    });
     const path = saveBriefAsset(asset);
     await indexAsset(store, embedder, asset);
 

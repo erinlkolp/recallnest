@@ -52,6 +52,8 @@ export async function indexAsset(
         title: asset.title,
         query: asset.query,
         profile: asset.profile,
+        originalScope: asset.scope,
+        originalMemoryIds: asset.evidence.map((item) => item.memoryId),
         tags: asset.tags,
         sources: asset.sources.map((item) => item.source),
       }
