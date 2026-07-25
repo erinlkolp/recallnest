@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { formatExplainResults, formatSearchResults } from "../memory-output.js";
+import { formatExplainResults, formatSearchResults, summarizeResults } from "../memory-output.js";
 import type { RetrievalResult } from "../retriever.js";
 
 function buildResult(id: string, metadata: Record<string, unknown>): RetrievalResult {
@@ -211,5 +211,18 @@ describe("memory output", () => {
     expect(output).toContain("key:preferences:这段文案简洁直接-先别改");
     expect(output).not.toContain("slot:reply-style:");
     expect(output).not.toContain("slot:tool-choice:");
+  });
+});
+
+describe("source labelling", () => {
+  it("does not fall back to the scope when metadata has no source", () => {
+    const summary = summarizeResults([buildResult("abcd1234-0000-0000-0000-000000000009", {})], {
+      query: "reply style",
+      profile: "default",
+    });
+
+    expect(summary.sources.map((item) => item.source)).not.toContain("memory:agent");
+    expect(summary.sources[0]?.source).toBe("unknown");
+    expect(summary.evidence[0]?.source).toBe("unknown");
   });
 });

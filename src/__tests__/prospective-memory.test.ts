@@ -281,3 +281,18 @@ describe("formatReminders", () => {
     expect(formatReminders([])).toEqual([]);
   });
 });
+
+describe("reminder provenance", () => {
+  it("records a source in reminder metadata so output never falls back to scope", async () => {
+    const store = createMockStore();
+    const embedder = createMockEmbedder();
+    const entry = await setReminder(store as never, embedder as never, {
+      trigger: "deployment",
+      action: "Check monitoring",
+      scope: "project:test",
+    });
+
+    const meta = JSON.parse(entry.metadata || "{}");
+    expect(meta.source).toBe("set_reminder");
+  });
+});
