@@ -16,6 +16,22 @@ import {
 
 export type { StableCategory } from "./context-composer-stable-selection.js";
 
+// English function words. extractTerms matches any ASCII run of 3+ chars, so
+// without this a task seed like "check for foreign scope leakage" can surface
+// "Task focus: for" — which then counts as a stable item and leads the summary.
+// Hard reject, unlike TASK_FOCUS_LOW_SIGNAL_TERMS below which only deprioritizes.
+const TASK_FOCUS_STOPWORDS = new Set([
+  "the", "and", "for", "but", "not", "are", "was", "were", "been", "being",
+  "with", "from", "this", "that", "these", "those", "has", "have", "had",
+  "its", "into", "onto", "via", "per", "out", "off", "than", "then",
+  "they", "them", "their", "our", "your", "you", "all", "any", "can",
+  "could", "should", "would", "will", "just", "only", "over", "under",
+  "when", "where", "which", "who", "why", "how", "what", "does", "did",
+  "such", "some", "more", "most", "less", "very", "too", "also", "both",
+  "each", "else", "here", "there", "once", "still", "about", "after",
+  "before", "again", "because", "while", "between", "during", "through",
+]);
+
 const TASK_FOCUS_LOW_SIGNAL_TERMS = new Set([
   "context",
   "composer",
@@ -94,6 +110,7 @@ function buildTaskSeedStableContext(taskSeed?: string, limit = 1): string[] {
     .filter((term) => {
       const normalized = normalizeText(term);
       if (!normalized || normalized.length < 2) return false;
+      if (TASK_FOCUS_STOPWORDS.has(normalized)) return false;
       if (looksLikeStableInstruction(normalized)) return false;
       if (containsLowSignalStableTerm(normalized)) return false;
 

@@ -1635,6 +1635,140 @@ describe("composeResumeContext", () => {
     expect(caseJoined).not.toContain("Telegram bridge MCP transport regression");
   });
 
+  it("keeps foreign project patterns out of essential context under an explicit scope", async () => {
+    const retriever = {
+      async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
+        if (context.category === "patterns") {
+          return [
+            withScope(
+              buildResult(
+                "pattern-recallnest-transport",
+                "patterns",
+                "Workflow pattern: RecallNest MCP transport rollout Steps: 1. Check scoped memory continuity before transport changes.",
+              ),
+              "project:recallnest",
+            ),
+            withScope(
+              buildResult(
+                "pattern-foreign-transport",
+                "patterns",
+                "Workflow pattern: Telegram bridge MCP transport rollout Steps: 1. Check bridge relay continuity before transport changes.",
+              ),
+              "project:telegram-bridge",
+            ),
+          ];
+        }
+
+        return [];
+      },
+    };
+
+    const response = await composeResumeContext({
+      retriever,
+      checkpointStore: {
+        async getLatest() {
+          return null;
+        },
+      },
+      listPins: () => [],
+    }, {
+      task: "继续 RecallNest continuity MCP transport rollout",
+      scope: "project:recallnest",
+      includeLatestCheckpoint: false,
+      limitPerSection: 3,
+    });
+
+    const essentialPatterns = (response.essentialContext?.activePatterns ?? []).join(" ");
+    expect(essentialPatterns).toContain("RecallNest MCP transport rollout");
+    expect(essentialPatterns).not.toContain("Telegram bridge MCP transport rollout");
+  });
+
+  it("produces no essential patterns when the scope has no matching memories", async () => {
+    const retriever = {
+      async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
+        if (context.category === "patterns") {
+          return [
+            withScope(
+              buildResult(
+                "pattern-foreign-continuity",
+                "patterns",
+                "Workflow pattern: Scoped project continuity recall Steps: 1. Call resume_context with the project scope when it is known.",
+              ),
+              "project:recallnest",
+            ),
+          ];
+        }
+
+        return [];
+      },
+    };
+
+    const response = await composeResumeContext({
+      retriever,
+      checkpointStore: {
+        async getLatest() {
+          return null;
+        },
+      },
+      listPins: () => [],
+    }, {
+      task: "continuity recall",
+      scope: "project:unrelated-empty",
+      includeLatestCheckpoint: false,
+      limitPerSection: 3,
+    });
+
+    const essentialPatterns = (response.essentialContext?.activePatterns ?? []).join(" ");
+    expect(essentialPatterns).not.toContain("Scoped project continuity recall");
+  });
+
+  it("keeps foreign project pins out of essential context under an explicit scope", async () => {
+    const retriever = {
+      async retrieve(): Promise<RetrievalResult[]> {
+        return [];
+      },
+    };
+
+    const buildPin = (id: string, scope: string, summary: string) => ({
+      id,
+      type: "pinned-memory" as const,
+      createdAt: "2026-03-16T04:00:00.000Z",
+      updatedAt: "2026-03-16T04:00:00.000Z",
+      title: summary,
+      summary,
+      tags: ["continuity"],
+      source: {
+        memoryId: `memory-${id}`,
+        scope,
+        timestamp: Date.parse("2026-03-16T04:00:00.000Z"),
+        metadata: {},
+      },
+      snippet: summary,
+      path: `/tmp/${id}.json`,
+    });
+
+    const response = await composeResumeContext({
+      retriever,
+      checkpointStore: {
+        async getLatest() {
+          return null;
+        },
+      },
+      listPins: () => [
+        buildPin("pin-recallnest", "project:recallnest", "RecallNest scoped recall keeps continuity inside the project scope."),
+        buildPin("pin-foreign", "project:telegram-bridge", "Telegram bridge relay continuity notes for the bridge project."),
+      ],
+    }, {
+      task: "继续 RecallNest continuity recall",
+      scope: "project:recallnest",
+      includeLatestCheckpoint: false,
+      limitPerSection: 3,
+    });
+
+    const essentialPins = (response.essentialContext?.pinnedMemories ?? []).join(" ");
+    expect(essentialPins).not.toContain("Telegram bridge relay continuity");
+  });
+
   it("filters foreign project workflow fallback patterns under scoped continuity recall", async () => {
     const retriever = {
       async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
@@ -3209,6 +3343,36 @@ describe("composeResumeContext", () => {
     expect(stableJoined).toContain("telegram");
     expect(stableJoined).not.toContain("[助手]");
     expect(stableJoined).not.toContain("README");
+  });
+
+  it("never turns an English stopword into a task focus item", async () => {
+    const retriever = {
+      async retrieve(): Promise<RetrievalResult[]> {
+        return [];
+      },
+    };
+
+    const response = await composeResumeContext({
+      retriever,
+      checkpointStore: {
+        async getLatest() {
+          return null;
+        },
+      },
+      listPins: () => [],
+    }, {
+      task: "check for foreign scope leakage",
+      scope: "project:recallnest",
+      includeLatestCheckpoint: false,
+      limitPerSection: 3,
+    });
+
+    const taskFocusItems = response.stableContext.filter((item) => item.startsWith("Task focus:"));
+    for (const item of taskFocusItems) {
+      expect(item).not.toBe("Task focus: for");
+      expect(item).not.toBe("Task focus: the");
+      expect(item).not.toBe("Task focus: and");
+    }
   });
 
   it("filters conversational durable pins out of scoped stable context", async () => {
