@@ -506,7 +506,80 @@ function parseMetadata(raw?: string): Record<string, unknown> {
 
 type RerankProvider = "jina" | "siliconflow" | "voyage" | "pinecone" | "vllm";
 
-interface RerankItem { index: number; score: number }
+export interface RerankItem { index: number; score: number }
+
+/**
+ * Logistic scale for mapping cross-encoder logits into 0-1.
+ *
+ * Calibrated against jina-reranker-v3 measured on 2026-07-26: a near-verbatim
+ * restatement of the query scored 0.362 and clearly irrelevant documents
+ * landed near -0.17. At 0.15 that spread maps to roughly 0.92 down to 0.24,
+ * which keeps real matches above hardMinScore while still ranking noise below
+ * its own pre-rerank fused score.
+ */
+const RERANK_LOGIT_SCALE = 0.15;
+
+/**
+ * Whether a provider/model pair returns 0-1 relevance probabilities.
+ * Returns null when the model is unknown and the batch must be inspected.
+ *
+ * Score range is a provider+model contract, not a per-batch property, so it is
+ * resolved from configuration wherever possible. Deciding per batch would make
+ * one memory's score depend on what else happened to match it.
+ */
+function rerankReturnsUnitRange(
+  provider: RerankProvider,
+  model: string | undefined,
+): boolean | null {
+  switch (provider) {
+    case "voyage":
+    case "pinecone":
+      return true;
+    case "jina":
+      // v3 emits unbounded logits; v1/v2 emit 0-1. Default model is v3.
+      return model ? /reranker-v[12]\b/.test(model) : false;
+    case "siliconflow":
+    case "vllm":
+    default:
+      // Both front arbitrary self-hosted models. No contract to rely on.
+      return null;
+  }
+}
+
+/** Numerically stable logistic, safe at extreme magnitudes in both directions. */
+function logisticScale(x: number): number {
+  const z = x / RERANK_LOGIT_SCALE;
+  if (z >= 0) return 1 / (1 + Math.exp(-z));
+  const e = Math.exp(z);
+  return e / (1 + e);
+}
+
+/**
+ * Map cross-encoder scores into the 0-1 range the blend in rerankResults
+ * assumes.
+ *
+ * jina-reranker-v3 returns unbounded, frequently negative scores. Feeding those
+ * raw into `ce * 0.6 + fused * 0.4` collapsed every result by roughly 0.3 —
+ * enough to push genuine mid-tier matches under hardMinScore and delete them.
+ *
+ * Deliberately not min-max over the batch: that pins the best candidate at
+ * exactly 1.0 on every query, reintroducing the score saturation fixed in
+ * PR #39, and makes scores batch-dependent. The logistic is monotonic, so
+ * ordering is untouched either way.
+ */
+export function normalizeRerankScores(
+  items: RerankItem[],
+  provider: RerankProvider,
+  model: string | undefined,
+): RerankItem[] {
+  if (items.length === 0) return items;
+
+  const declared = rerankReturnsUnitRange(provider, model);
+  const isUnitRange = declared ?? !items.some(item => item.score < 0 || item.score > 1);
+  if (isUnitRange) return items;
+
+  return items.map(item => ({ ...item, score: logisticScale(item.score) }));
+}
 
 /** Build provider-specific request headers and body */
 function buildRerankRequest(
@@ -1544,10 +1617,13 @@ export class MemoryRetriever {
           if (!parsed) {
             logWarn("Rerank API: invalid response shape, falling back to cosine");
           } else {
-            // Build a Set of returned indices to identify unreturned candidates
-            const returnedIndices = new Set(parsed.map(r => r.index));
+            // Providers disagree on score range; the blend below assumes 0-1.
+            const normalized = normalizeRerankScores(parsed, provider, model);
 
-            const reranked = parsed
+            // Build a Set of returned indices to identify unreturned candidates
+            const returnedIndices = new Set(normalized.map(r => r.index));
+
+            const reranked = normalized
               .filter(item => item.index >= 0 && item.index < results.length)
               .map(item => {
                 const original = results[item.index];
