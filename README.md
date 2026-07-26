@@ -67,6 +67,34 @@ cp .env.example .env
 # Edit .env → add your JINA_API_KEY
 ```
 
+#### Environment variables
+
+`.env` holds your API keys; `.env` is gitignored, so keys never enter a commit.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `JINA_API_KEY` | **Yes** | Embedding API key. Get a free one at [jina.ai](https://jina.ai/). Referenced from `config.json` as `"apiKey": "${JINA_API_KEY}"`. |
+| `RECALLNEST_RERANK_API_KEY` | No | Cross-encoder reranking. `retrieval.rerank` defaults to `"cross-encoder"`, but **without this key the pipeline silently falls back to cosine similarity**. The same Jina key works — the default model is `jina-reranker-v3` @ `api.jina.ai`. |
+
+```bash
+# .env
+JINA_API_KEY=your_jina_api_key_here
+
+# Optional — enables cross-encoder reranking
+RECALLNEST_RERANK_API_KEY=your_reranker_api_key_here
+```
+
+Both are referenced from `config.json` via `${VAR}` expansion, so the key itself stays in `.env`. `config.json.example` already wires the reranker reference, so a fresh copy needs no edit:
+
+```jsonc
+// config.json
+"retrieval": {
+  "rerankApiKey": "${RECALLNEST_RERANK_API_KEY}"
+}
+```
+
+If the variable is unset the field is dropped — no unexpanded placeholder is ever passed through as a credential — and RecallNest warns once at startup that cosine is what actually runs. Feature flags also live in `.env`; see `.env.example` for the full list.
+
 ### Start the server
 
 ```bash
