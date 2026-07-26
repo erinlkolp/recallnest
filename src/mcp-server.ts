@@ -1461,23 +1461,25 @@ registerTool(
 // --- memory_stats tool ---
 registerTool(
   "memory_stats",
-  "Show aggregate statistics of the memory database: total entries, counts by source and category. Read-only. Use when you need an overview of memory store health or size.",
+  "Show aggregate statistics of the memory database: total entries, counts by scope prefix and category. Read-only. Use when you need an overview of memory store health or size.",
   {},
   async () => {
     const stats = await store.stats();
 
-    // Aggregate by source prefix
-    const sourceCounts: Record<string, number> = {};
+    // Aggregate by scope prefix. This is deliberately not labelled "by source":
+    // store.stats() exposes scope and category counts only, and prefixes like
+    // "project" / "asset" are scope namespaces, not capture sources.
+    const scopePrefixCounts: Record<string, number> = {};
     for (const [scope, count] of Object.entries(stats.scopeCounts)) {
       const prefix = scope.split(":")[0];
-      sourceCounts[prefix] = (sourceCounts[prefix] || 0) + count;
+      scopePrefixCounts[prefix] = (scopePrefixCounts[prefix] || 0) + count;
     }
 
     const lines = [
       `Total entries: ${stats.totalCount}`,
       "",
-      "By source:",
-      ...Object.entries(sourceCounts)
+      "By scope prefix:",
+      ...Object.entries(scopePrefixCounts)
         .sort((a, b) => b[1] - a[1])
         .map(([src, count]) => `  ${src}: ${count}`),
       "",

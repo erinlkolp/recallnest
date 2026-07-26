@@ -108,6 +108,17 @@ describe("extractHeuristic", () => {
     expect(items[0].text).toContain("rate limit");
   });
 
+  it("does not let the correction lookahead swallow an independent signal", () => {
+    const items = extractHeuristic(
+      "Correction: the baseline is 1678, not 1666. Important: never push to the upstream remote."
+    );
+    expect(items.length).toBe(2);
+    expect(items[0].sourceContext).toBe("correction signal");
+    expect(items[0].text).not.toContain("never push");
+    expect(items[1].sourceContext).toBe("explicit memory instruction");
+    expect(items[1].text).toContain("never push");
+  });
+
   it("extracts explicit memory instruction signals (ZH)", () => {
     const items = extractHeuristic("记住这个：我的 API key 过期日期是每月 15 号需要更新");
     expect(items.length).toBe(1);
