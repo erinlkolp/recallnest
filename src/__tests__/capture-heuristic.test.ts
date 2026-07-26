@@ -82,6 +82,20 @@ describe("extractHeuristic", () => {
     expect(items[0].sourceContext).toBe("decision signal");
   });
 
+  it("extracts decision signals written as a 'Decision:' label", () => {
+    const items = extractHeuristic("Decision: we will use LanceDB as the only vector store and never introduce a second one");
+    expect(items.length).toBe(1);
+    expect(items[0].category).toBe("events");
+    expect(items[0].sourceContext).toBe("decision signal");
+  });
+
+  it("extracts preference signals with an intensifier adverb", () => {
+    const items = extractHeuristic("I always want commits to use conventional commit prefixes like fix and feat");
+    expect(items.length).toBe(1);
+    expect(items[0].category).toBe("preferences");
+    expect(items[0].sourceContext).toBe("preference signal");
+  });
+
   it("extracts correction signals with next sentence", () => {
     const items = extractHeuristic(
       "Actually, that's wrong. The rate limit is 200 per minute. And the sky is blue."

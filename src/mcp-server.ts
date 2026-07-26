@@ -1409,12 +1409,16 @@ registerTool(
       };
     }
 
-    const lines = [
-      `✅ Memory ${result.memoryId.slice(0, 8)} forgotten.`,
-      `Privacy tier: ${result.evidence?.privacyTier || "unknown"}`,
-      `KG triples removed: ${result.kgTriplesRemoved ? "yes" : "no/N/A"}`,
-      `Cascade demoted: ${result.cascadeResult.demotedCount} related memories`,
-    ];
+    // An asset has no privacy tier, KG triples, or neighbours to demote, so the
+    // memory-shaped fields would all read "unknown"/0 and imply something failed.
+    const lines = result.assetType
+      ? [`✅ ${result.assetType === "brief" ? "Brief" : "Pin"} ${result.memoryId.slice(0, 8)} deleted.`]
+      : [
+        `✅ Memory ${result.memoryId.slice(0, 8)} forgotten.`,
+        `Privacy tier: ${result.evidence?.privacyTier || "unknown"}`,
+        `KG triples removed: ${result.kgTriplesRemoved ? "yes" : "no/N/A"}`,
+        `Cascade demoted: ${result.cascadeResult.demotedCount} related memories`,
+      ];
     if (result.pinsRemoved > 0) {
       lines.push(`Pins removed: ${result.pinsRemoved}`);
     }

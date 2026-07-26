@@ -77,6 +77,8 @@ export interface ForgetResult {
   pinsRemoved: number;
   /** Number of derived brief assets removed */
   briefsRemoved: number;
+  /** Set when the id resolved to a standalone asset rather than a memory row */
+  assetType?: "pin" | "brief";
   /** Error message if failed */
   error?: string;
 }
@@ -115,6 +117,110 @@ export interface ForgetByIdDeps {
 }
 
 // ---------------------------------------------------------------------------
+// Fallback: Forget a standalone asset (brief or pin) by its own id
+// ---------------------------------------------------------------------------
+
+/** Shortest id prefix accepted, matching the memory-id prefix rule. */
+const MIN_ASSET_ID_PREFIX = 8;
+
+function assetIdMatches(assetId: string, query: string): boolean {
+  if (assetId === query) return true;
+  return query.length >= MIN_ASSET_ID_PREFIX && assetId.startsWith(query);
+}
+
+function emptyAssetResult(memoryId: string, error?: string): ForgetResult {
+  return {
+    success: false,
+    memoryId,
+    kgTriplesRemoved: false,
+    cascadeResult: { demotedCount: 0, demotedIds: [] },
+    pinsRemoved: 0,
+    briefsRemoved: 0,
+    ...(error ? { error } : {}),
+  };
+}
+
+async function forgetAssetById(
+  deps: {
+    store: MemoryStore;
+    pinAssets: PinAssetAccess;
+    briefAssets: BriefAssetAccess;
+    auditLogger?: AuditLogger | null;
+  },
+  request: { memoryId: string; confirm: boolean; reason?: string },
+): Promise<ForgetResult> {
+  const { store, pinAssets, briefAssets, auditLogger } = deps;
+  const { memoryId, confirm, reason } = request;
+
+  const brief = briefAssets.list(BRIEF_SCAN_LIMIT).find((asset) => assetIdMatches(asset.id, memoryId));
+  const pin = brief
+    ? undefined
+    : pinAssets.list(PIN_SCAN_LIMIT).find((asset) => assetIdMatches(asset.id, memoryId));
+
+  if (!brief && !pin) {
+    return emptyAssetResult(memoryId, `Memory ${memoryId} not found`);
+  }
+
+  const assetType = brief ? "brief" : "pin";
+  const asset = brief ?? pin!;
+
+  // Assets embed their sources' text verbatim, so deleting one is as
+  // destructive as forgetting a memory — hold it to the same confirmation bar.
+  if (!confirm) {
+    return {
+      ...emptyAssetResult(asset.id, `Asset ${asset.id} is a ${assetType} — set confirm=true to proceed`),
+      assetType,
+    };
+  }
+
+  // indexAsset() files briefs under `asset:brief:<first 8>` and pins under `asset:<first 8>`
+  const indexedScope = brief
+    ? `asset:brief:${asset.id.slice(0, 8)}`
+    : `asset:${asset.id.slice(0, 8)}`;
+
+  try {
+    await store.bulkDelete([indexedScope]);
+  } catch (err) {
+    return {
+      ...emptyAssetResult(asset.id, `Asset index delete failed: ${err instanceof Error ? err.message : String(err)}`),
+      assetType,
+    };
+  }
+
+  try {
+    if (brief) briefAssets.remove(brief.path);
+    else pinAssets.remove(pin!.path);
+  } catch (err) {
+    return {
+      ...emptyAssetResult(asset.id, `Asset file delete failed: ${err instanceof Error ? err.message : String(err)}`),
+      assetType,
+    };
+  }
+
+  try {
+    auditLogger?.log({
+      operation: "forget",
+      scope: indexedScope,
+      memoryId: asset.id,
+      actor: "system",
+      details: `asset=${assetType} reason=${reason || "none"}`,
+    });
+  } catch (err) {
+    console.error("[recallnest] Audit log failed during asset forget:", err instanceof Error ? err.message : String(err));
+  }
+
+  return {
+    success: true,
+    memoryId: asset.id,
+    kgTriplesRemoved: false,
+    cascadeResult: { demotedCount: 0, demotedIds: [] },
+    pinsRemoved: pin ? 1 : 0,
+    briefsRemoved: brief ? 1 : 0,
+    assetType,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Core: Forget a single memory
 // ---------------------------------------------------------------------------
 
@@ -130,15 +236,11 @@ export async function forgetMemory(
   // 1. Fetch target
   const entry = await store.get(memoryId, scopeFilter);
   if (!entry) {
-    return {
-      success: false,
-      memoryId,
-      kgTriplesRemoved: false,
-      cascadeResult: { demotedCount: 0, demotedIds: [] },
-      pinsRemoved: 0,
-      briefsRemoved: 0,
-      error: `Memory ${memoryId} not found`,
-    };
+    // Assets are not memory rows: a brief lives on disk and is indexed under
+    // `asset:brief:<id>`, so its own id never resolves here. Without this
+    // fallback a brief could only be removed as collateral from forgetting one
+    // of its sources, leaving no way to delete it directly.
+    return forgetAssetById({ store, pinAssets, briefAssets, auditLogger }, { memoryId, confirm, reason });
   }
 
   // 2. Privacy tier check

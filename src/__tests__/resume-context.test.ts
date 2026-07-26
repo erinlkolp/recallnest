@@ -5036,6 +5036,83 @@ describe("composeLightResumeContext", () => {
     expect(matches?.length).toBeLessThanOrEqual(1);
   });
 
+  it("drops retrieved memories from other scopes", async () => {
+    // retrieveCandidates unions a scoped retrieval with an unscoped one, so the
+    // raw result set holds foreign rows. Full mode re-filters; light mode must too.
+    const retriever = {
+      async retrieve(): Promise<RetrievalResult[]> {
+        return [
+          withScope(buildResult("own", "entities", "RecallNest is the shared memory layer."), "project:recallnest"),
+          withScope(buildResult("foreign", "entities", "VU-Server is a Tornado API for a USB dial hub."), "project:vu-server"),
+        ];
+      },
+    };
+
+    const result = await composeLightResumeContext({
+      retriever,
+      checkpointStore: { async getLatest() { return null; } },
+      listPins: () => [],
+    }, {
+      scope: "project:recallnest",
+      includeLatestCheckpoint: true,
+      limitPerSection: 3,
+    });
+
+    expect(result.text).toContain("shared memory layer");
+    expect(result.text).not.toContain("VU-Server");
+  });
+
+  it("drops pin assets belonging to another scope", async () => {
+    const retriever = {
+      async retrieve(): Promise<RetrievalResult[]> {
+        return [];
+      },
+    };
+
+    const result = await composeLightResumeContext({
+      retriever,
+      checkpointStore: { async getLatest() { return null; } },
+      listPins: () => [{
+        path: "/tmp/pin-foreign.json",
+        title: "Throwaway smoke-test pin",
+        summary: "Disposable marker from an unrelated project",
+        pinId: "pin-foreign",
+        memoryId: "mem-foreign",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        source: { scope: "project:smoketest" },
+      }] as never,
+    }, {
+      scope: "project:recallnest",
+      includeLatestCheckpoint: true,
+      limitPerSection: 3,
+    });
+
+    expect(result.text).not.toContain("Disposable marker");
+  });
+
+  it("keeps every memory when no scope is requested", async () => {
+    const retriever = {
+      async retrieve(): Promise<RetrievalResult[]> {
+        return [
+          withScope(buildResult("a", "entities", "RecallNest is the shared memory layer."), "project:recallnest"),
+          withScope(buildResult("b", "entities", "VU-Server is a Tornado API for a USB dial hub."), "project:vu-server"),
+        ];
+      },
+    };
+
+    const result = await composeLightResumeContext({
+      retriever,
+      checkpointStore: { async getLatest() { return null; } },
+      listPins: () => [],
+    }, {
+      includeLatestCheckpoint: true,
+      limitPerSection: 3,
+    });
+
+    expect(result.text).toContain("shared memory layer");
+    expect(result.text).toContain("VU-Server");
+  });
+
   it("respects scope from input over checkpoint", async () => {
     const calls: RetrievalContext[] = [];
     const retriever = {

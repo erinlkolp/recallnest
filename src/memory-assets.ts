@@ -422,9 +422,12 @@ export function readPinAsset(pinIdOrFile: string): (PinAsset & { path: string })
 }
 
 export function assetSummaryLine(asset: MemoryAsset): string {
+  // A brief records the scope it was built from; printing its source list here
+  // put "agent, manual" under a column headed "Scope", which read as though the
+  // brief were unscoped.
   const scope = asset.type === "pinned-memory"
     ? asset.source.scope
-    : asset.sources.map((item) => item.source).join(", ").slice(0, 24) || "brief";
+    : asset.scope || "brief";
   const kind = asset.type === "pinned-memory" ? "pin" : "brief";
   return `${asset.id.slice(0, 8)}  ${kind.padEnd(5)}  ${asset.title}  [${scope}]  ${asset.createdAt.slice(0, 10)}`;
 }
