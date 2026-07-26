@@ -10,7 +10,7 @@ import { applyRetrievalProfile } from "./retrieval-profiles.js";
 import { AccessTracker } from "./access-tracker.js";
 import { FrequencyTracker } from "./frequency-tracker.js";
 import { createLLMClient, type LLMClient, type LLMConfig } from "./llm-client.js";
-import { logInfo } from "./stderr-log.js";
+import { logInfo, logWarn } from "./stderr-log.js";
 
 export type RecallMode = "full" | "light" | "summary" | "off";
 
@@ -96,6 +96,64 @@ export function expandHome(p: string): string {
   return p;
 }
 
+/**
+ * Expand ${VAR} placeholders in retrieval config, and report whether the
+ * effective config asks for cross-encoder reranking it cannot actually perform.
+ *
+ * Unlike resolveEnv, an unset variable drops the field instead of throwing:
+ * retrieval credentials are optional, and every consumer already degrades
+ * gracefully without them. Dropping matters — keeping the literal "${VAR}"
+ * would read as a real credential at retriever.ts's cross-encoder guard and
+ * fire a doomed 401 round trip on every single retrieval.
+ */
+export function resolveRetrievalConfig(
+  raw: Partial<RetrievalConfig>,
+  env: Record<string, string | undefined> = process.env,
+): { config: Partial<RetrievalConfig>; degraded: boolean } {
+  const config: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== "string") {
+      config[key] = value;
+      continue;
+    }
+    let unresolved = false;
+    const expanded = value.replace(/\$\{([^}]+)\}/g, (_, name: string) => {
+      const envVal = env[name];
+      if (!envVal) {
+        unresolved = true;
+        return "";
+      }
+      return envVal;
+    });
+    if (!unresolved) config[key] = expanded;
+  }
+
+  const resolved = config as Partial<RetrievalConfig>;
+  const effective = { ...DEFAULT_RETRIEVAL_CONFIG, ...resolved };
+  const needsApiKey = (effective.rerankProvider || "jina") !== "vllm";
+  const degraded =
+    effective.rerank === "cross-encoder" && needsApiKey && !effective.rerankApiKey;
+
+  return { config: resolved, degraded };
+}
+
+/**
+ * createComponents runs once per retrieval profile, so warn at most once per
+ * process — the operator needs to know cosine is what actually runs, not a
+ * line per profile.
+ */
+let rerankDegradationWarned = false;
+
+function warnOnceIfRerankDegraded(degraded: boolean): void {
+  if (!degraded || rerankDegradationWarned) return;
+  rerankDegradationWarned = true;
+  logWarn(
+    '[WARN] rerank="cross-encoder" but no API key resolved; using cosine fallback. ' +
+    "Set RECALLNEST_RERANK_API_KEY to enable cross-encoder reranking.",
+  );
+}
+
 export function createComponents(config: LocalMemoryConfig, profileName?: string) {
   const dbPath = resolve(metaDir(import.meta), "..", expandHome(config.dbPath));
   validateStoragePath(dbPath);
@@ -112,9 +170,11 @@ export function createComponents(config: LocalMemoryConfig, profileName?: string
 
   const embedder = createEmbedder(embeddingConfig);
   const store = new MemoryStore({ dbPath, vectorDim: embedder.dimensions });
+  const { config: retrievalOverrides, degraded } = resolveRetrievalConfig(config.retrieval || {});
+  warnOnceIfRerankDegraded(degraded);
   const baseRetrievalConfig = {
     ...DEFAULT_RETRIEVAL_CONFIG,
-    ...(config.retrieval || {}),
+    ...retrievalOverrides,
   };
   const { profile, config: retrieverConfig } = applyRetrievalProfile(baseRetrievalConfig, profileName);
   const retriever = createRetriever(store, embedder, retrieverConfig);
