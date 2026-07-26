@@ -31,7 +31,12 @@ export interface FrequencyStats {
 export interface FrequencyTrackerConfig {
   /** Path to persistence file. Default: data/frequency-stats.json */
   filePath: string;
-  /** Boost factor per log2(hitCount). Default: 0.15 */
+  /**
+   * Boost factor per log2(hitCount). Default: 0.03.
+   * Paired with MAX_FREQUENCY_BOOST: this slope reaches the cap at ~32
+   * effective hits, so the boost stays graded on the way up. A larger factor
+   * hits the ceiling almost immediately and degenerates into a binary flag.
+   */
   boostFactor: number;
   /** Days without a hit before effective count halves. Default: 30 */
   decayHalfLifeDays: number;
@@ -43,9 +48,16 @@ export interface FrequencyTrackerConfig {
   flushIntervalMs: number;
 }
 
+/**
+ * Upper bound on the additive frequency boost, so the multiplier never exceeds
+ * x1.15 no matter how many hits accumulate. Matches the ceiling that
+ * applyAccessCountBoost applies to the sibling access-count signal.
+ */
+export const MAX_FREQUENCY_BOOST = 0.15;
+
 export const DEFAULT_FREQUENCY_CONFIG: FrequencyTrackerConfig = {
   filePath: join(process.cwd(), "data", "frequency-stats.json"),
-  boostFactor: 0.15,
+  boostFactor: 0.03,
   decayHalfLifeDays: 30,
   minHitsForBoost: 2,
   corePromotionThreshold: 3,
@@ -86,7 +98,16 @@ export class FrequencyTracker {
   /**
    * Compute the frequency boost multiplier for a memory.
    * Returns 1.0 (no boost) if below threshold.
-   * Formula: 1 + log2(effectiveHits) * boostFactor
+   * Formula: 1 + min(MAX_FREQUENCY_BOOST, log2(effectiveHits) * boostFactor)
+   *
+   * The cap matters: recordHits() is fed by every retrieval, so a memory that
+   * ranks well keeps climbing, and an uncapped log2 curve reached x2.06 at 135
+   * hits in a real store. At that size the multiplier swamps semantic
+   * similarity and pushes scores into the 1.0 clamp in applyFrequencyBoost,
+   * collapsing popular memories into a tie that makes the final sort a no-op
+   * and truncates genuine direct matches out of the result window. Bounded,
+   * frequency stays a tiebreaker between close candidates instead of an
+   * override. Mirrors the cap applyAccessCountBoost already uses.
    */
   getBoostMultiplier(memoryId: string): number {
     const entry = this.stats[memoryId];
@@ -95,7 +116,8 @@ export class FrequencyTracker {
     const effectiveHits = this.effectiveHitCount(entry);
     if (effectiveHits < this.config.minHitsForBoost) return 1.0;
 
-    return 1 + Math.log2(effectiveHits) * this.config.boostFactor;
+    const raw = Math.log2(effectiveHits) * this.config.boostFactor;
+    return 1 + Math.min(MAX_FREQUENCY_BOOST, raw);
   }
 
   /** Check if a memory should be auto-promoted to core tier. */

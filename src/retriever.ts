@@ -78,10 +78,19 @@ export interface RetrievalConfig {
   rerankProvider?: "jina" | "siliconflow" | "voyage" | "pinecone" | "vllm";
   /**
    * Length normalization: penalize long entries that dominate via sheer keyword
-   * density. Formula: score *= 1 / (1 + log2(charLen / anchor)).
-   * anchor = reference length (default: 500 chars). Entries shorter than anchor
-   * get a slight boost; longer entries get penalized progressively.
-   * Set 0 to disable. (default: 300)
+   * density. Formula: score *= 1 / (1 + 0.5 * log2(charLen / anchor)).
+   * anchor = reference length. Entries at or below the anchor are untouched
+   * (there is no short-entry boost); longer entries are penalized progressively.
+   * Set 0 to disable. (default: 1500)
+   *
+   * The anchor should sit near the top of the normal length distribution, not
+   * at its median: this stage is a third length penalty on top of BM25's own
+   * document-length normalization and a cosine score that is already
+   * length-invariant, so a low anchor discounts ordinary memories rather than
+   * correcting a bias. At the previous 500 it penalized 81% of a real store,
+   * cutting structured store_case records (p50 = 1147 chars) by 37% and pushing
+   * exact matches out of top-k. 1500 leaves the normal distribution alone and
+   * still damps the genuine long tail (p99 = 2039, max = 2588).
    */
   lengthNormAnchor: number;
   /**
@@ -239,7 +248,7 @@ export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   filterNoise: true,
   rerankModel: "jina-reranker-v3",
   rerankEndpoint: "https://api.jina.ai/v1/rerank",
-  lengthNormAnchor: 500,
+  lengthNormAnchor: 1500,
   hardMinScore: 0.35,
   timeDecayHalfLifeDays: 60,
   hotnessWeight: 0,
@@ -1740,9 +1749,9 @@ export class MemoryRetriever {
   /**
    * Length normalization: penalize long entries that dominate search results
    * via sheer keyword density and broad semantic coverage.
-   * Short, focused entries (< anchor) get a slight boost.
+   * Entries at or below the anchor are untouched — there is no short-entry boost.
    * Long, sprawling entries (> anchor) get penalized.
-   * Formula: score *= 1 / (1 + log2(charLen / anchor))
+   * Formula: score *= 1 / (1 + 0.5 * log2(charLen / anchor))
    */
   private applyLengthNormalization(results: RetrievalResult[]): RetrievalResult[] {
     const anchor = this.config.lengthNormAnchor;
@@ -1752,8 +1761,8 @@ export class MemoryRetriever {
       const charLen = r.entry.text.length;
       const ratio = charLen / anchor;
       // No penalty for entries at or below anchor length.
-      // Gentle logarithmic decay for longer entries:
-      //   anchor (500) → 1.0, 800 → 0.75, 1000 → 0.67, 1500 → 0.56, 2000 → 0.50
+      // Gentle logarithmic decay for longer entries, at anchor = 1500:
+      //   1500 → 1.0, 2000 → 0.83, 2500 → 0.73, 3000 → 0.67, 4000 → 0.60
       // This prevents long, keyword-rich entries from dominating top-k
       // while keeping their scores reasonable.
       const logRatio = Math.log2(Math.max(ratio, 1)); // no boost for short entries
