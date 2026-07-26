@@ -6,10 +6,10 @@
  * so any MCP-compatible AI client (Claude Code, etc.)
  * can search your indexed conversations.
  *
- * Tool tiers:
- * - core: Always exposed (5 tools)
- * - advanced: Exposed by default, includes core (15 tools)
- * - full: All tools including governance (24 tools)
+ * Tool tiers (see mcp-tool-tiers.ts for the table):
+ * - core: Always exposed
+ * - advanced: Exposed by default, includes core
+ * - full: All tools including governance
  *
  * Control: RECALLNEST_MCP_TIER=core|advanced|full
  */
@@ -20,67 +20,17 @@ import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/m
 // Tier Configuration
 // ============================================================================
 
-type ToolTier = "core" | "advanced" | "governance";
+import {
+  TOOL_TIERS,
+  formatToolList,
+  resolveActiveTier,
+  shouldRegisterTool as shouldRegisterToolAtTier,
+} from "./mcp-tool-tiers.js";
 
-const MCP_TIER = (process.env.RECALLNEST_MCP_TIER || "advanced") as "core" | "advanced" | "full";
-
-const TOOL_TIERS: Record<string, ToolTier> = {
-  // Core (always)
-  resume_context: "core",
-  search_memory: "core",
-  store_memory: "core",
-  checkpoint_session: "core",
-  latest_checkpoint: "core",
-  list_tools: "core",
-
-  set_reminder: "core",
-
-  // Advanced
-  batch_store: "advanced",
-  auto_capture: "advanced",
-  store_case: "advanced",
-  store_workflow_pattern: "advanced",
-  promote_memory: "advanced",
-  explain_memory: "advanced",
-  distill_memory: "advanced",
-  brief_memory: "advanced",
-  pin_memory: "advanced",
-  list_assets: "advanced",
-  list_pins: "advanced",
-  memory_stats: "advanced",
-  data_checkup: "advanced",
-  memory_lint: "advanced",
-  export_graph: "advanced",
-  dream: "advanced",
-  memory_drill_down: "advanced",
-  export_memory: "advanced",
-  store_skill: "advanced",
-  retrieve_skill: "advanced",
-  import_conversations: "advanced",
-  distill_session: "advanced",
-  scan_skill_promotions: "governance",
-  forget_memory: "advanced",
-
-  // Governance (CLI-only, not in MCP by default)
-  workflow_observe: "governance",
-  workflow_health: "governance",
-  workflow_evidence: "governance",
-  list_conflicts: "governance",
-  resolve_conflict: "governance",
-  audit_conflicts: "governance",
-  escalate_conflicts: "governance",
-  list_dirty_briefs: "governance",
-  clean_dirty_briefs: "governance",
-  consolidate_memories: "governance",
-};
+const MCP_TIER = resolveActiveTier();
 
 function shouldRegisterTool(toolName: string): boolean {
-  const tier = TOOL_TIERS[toolName];
-  if (!tier) return true; // unknown tools always register (backward compat)
-  if (MCP_TIER === "full") return true;
-  if (MCP_TIER === "advanced") return tier !== "governance";
-  if (MCP_TIER === "core") return tier === "core";
-  return true;
+  return shouldRegisterToolAtTier(toolName, MCP_TIER);
 }
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { autoRegisterBabelMemory } from "./language-hook.js";
@@ -1772,24 +1722,14 @@ registerTool(
       .describe("Which tier of tools to list. Returns tools at this tier and below."),
   },
   async ({ tier }) => {
-    const requestedTier = tier ?? "advanced";
-    const tierOrder: Record<string, number> = { core: 0, advanced: 1, governance: 2 };
-    const maxOrder = requestedTier === "full" ? 2 : tierOrder[requestedTier] ?? 1;
-
-    const lines: string[] = [`Available tools (tier: ${requestedTier}):`];
-    for (const [toolName, toolTier] of Object.entries(TOOL_TIERS)) {
-      if ((tierOrder[toolTier] ?? 999) > maxOrder) continue;
-      const desc = TOOL_DESCRIPTIONS.get(toolName);
-      const oneLiner = desc
-        ? desc.split(/[.!]\s/)[0]?.slice(0, 100) ?? desc.slice(0, 100)
-        : "(no description)";
-      lines.push(`- ${toolName}: ${oneLiner}`);
-    }
-
     return {
       content: [{
         type: "text" as const,
-        text: lines.join("\n"),
+        text: formatToolList({
+          requestedTier: tier ?? "advanced",
+          activeTier: MCP_TIER,
+          descriptions: TOOL_DESCRIPTIONS,
+        }),
       }],
     };
   },
