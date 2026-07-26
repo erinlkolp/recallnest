@@ -28,6 +28,7 @@ import { collapseResults, estimateTokens, type CollapseInput } from "./context-c
 import { filterByRelevance } from "./post-retrieval-filter.js";
 import { reconstruct as runReconstruction } from "./context-reconstructor.js";
 import { parseNarrative, isNarrativeModeEnabled } from "./narrative-schema.js";
+import { matchesScopeFilter } from "./scope-policy.js";
 type ResumeCategory = "profile" | "preferences" | "entities" | "patterns" | "cases";
 
 interface ResumeRetriever {
@@ -416,12 +417,23 @@ export async function composeResumeContext(
     synthesizeSection(recentCases, queryHint, llm),
   ]);
 
+  // Scope isolation: retrieveCandidates merges a scoped retrieval with an
+  // unscoped one, so the raw union can hold rows from unrelated scopes. The
+  // named sections re-filter it themselves; every renderer below consumes this
+  // list instead, so a caller-specified scope is never leaked past.
+  const recalledResults = [
+    ...profileResults,
+    ...preferenceResults,
+    ...entityResults,
+    ...filteredPatterns,
+    ...filteredCases,
+  ].filter((r) => !resolvedScope || matchesScopeFilter(r.entry.scope, [resolvedScope]));
+
   // HP-narrative: Group recalled items by life period for narrative context
   let narrativeGroups: Array<{ period: string; items: string[] }> | undefined;
   if (isNarrativeModeEnabled()) {
-    const allNarrativeResults = [...profileResults, ...preferenceResults, ...entityResults, ...filteredPatterns, ...filteredCases];
     const periodMap = new Map<string, string[]>();
-    for (const r of allNarrativeResults) {
+    for (const r of recalledResults) {
       const narrative = parseNarrative(r.entry.metadata);
       if (!narrative) continue;
       const items = periodMap.get(narrative.lifePeriodLabel) ?? [];
@@ -438,7 +450,7 @@ export async function composeResumeContext(
   // Gathers all retrieval results, deduplicates, and renders at L0/L1/L2 based on score.
   const allResults: RetrievalResult[] = [];
   const seenIds = new Set<string>();
-  for (const r of [...profileResults, ...preferenceResults, ...entityResults, ...filteredPatterns, ...filteredCases]) {
+  for (const r of recalledResults) {
     if (!seenIds.has(r.entry.id)) {
       seenIds.add(r.entry.id);
       allResults.push(r);
@@ -472,8 +484,7 @@ export async function composeResumeContext(
   let reconstructionContradictions: Array<{ memoryIds: [string, string]; description: string }> | undefined;
   const constructiveFlag = process.env.RECALLNEST_CONSTRUCTIVE_RETRIEVAL === "true";
   if (constructiveFlag && deps.llm?.isAvailable?.()) {
-    const allReconResults = [...profileResults, ...preferenceResults, ...entityResults, ...filteredPatterns, ...filteredCases];
-    if (allReconResults.length >= 3) {
+    if (recalledResults.length >= 3) {
       try {
         const taskQuery = latestCheckpoint?.summary ?? taskSeed ?? "general context";
         const checkpointContext = latestCheckpoint ? {
@@ -482,7 +493,7 @@ export async function composeResumeContext(
           scope: resolvedScope,
         } : resolvedScope ? { scope: resolvedScope } : undefined;
         const recon = await runReconstruction(
-          { query: taskQuery, results: allReconResults, mode: "resume", maxTokens: 600, checkpointContext },
+          { query: taskQuery, results: recalledResults, mode: "resume", maxTokens: 600, checkpointContext },
           deps.llm,
         );
         if (recon.reconstructed) {

@@ -155,6 +155,48 @@ function checkVersionGroups(entries: MemoryEntry[]): CheckResult {
   };
 }
 
+/**
+ * Check 7: Scopes that differ only by case.
+ *
+ * matchesScopeFilter compares canonical (lowercased) scopes, so these rows do
+ * still union on read — but they remain two spellings in storage, which splits
+ * stats and inventory reporting and signals a client writing pre-canonical
+ * scopes. Writes are canonicalized now, so a hit here means legacy rows that
+ * scripts/migrate-scope-case.ts should fold together.
+ */
+export function checkScopeCaseCollisions(entries: MemoryEntry[]): CheckResult {
+  const variantsByCanonical = new Map<string, Map<string, number>>();
+  for (const entry of entries) {
+    const scope = entry.scope;
+    if (typeof scope !== "string" || scope.trim().length === 0) continue;
+    const canonical = scope.toLowerCase();
+    const variants = variantsByCanonical.get(canonical) ?? new Map<string, number>();
+    variants.set(scope, (variants.get(scope) ?? 0) + 1);
+    variantsByCanonical.set(canonical, variants);
+  }
+
+  const collisions = [...variantsByCanonical.entries()].filter(([, v]) => v.size > 1);
+  if (collisions.length === 0) {
+    return { name: "scope_case_collisions", status: "ok", detail: "No case-variant scopes found" };
+  }
+
+  const detail = collisions
+    .map(([canonical, variants]) => {
+      const breakdown = [...variants.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([variant, count]) => `${variant}=${count}`)
+        .join(", ");
+      return `${canonical} (${breakdown})`;
+    })
+    .join("; ");
+
+  return {
+    name: "scope_case_collisions",
+    status: "warning",
+    detail: `${collisions.length} scope(s) stored under multiple casings: ${detail}`,
+  };
+}
+
 /** Check 6 (F2): Interference density — detect semantic clustering pressure. */
 function checkInterferenceDensity(entries: MemoryEntry[]): CheckResult {
   // Only check entries with vectors (skip schema/empty entries)
@@ -212,6 +254,7 @@ export async function runDataCheckup(deps: CheckupDeps): Promise<CheckupReport> 
       checkConflictBacklog(deps.openConflictCount),
       checkVersionGroups(entries),
       checkInterferenceDensity(entries),
+      checkScopeCaseCollisions(entries),
     ],
     totalEntries: entries.length,
     timestamp: new Date().toISOString(),

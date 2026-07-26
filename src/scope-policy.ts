@@ -5,6 +5,20 @@ function normalizeScopeValue(value: string | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+/**
+ * Canonical scope form: whitespace-collapsed and lowercased.
+ *
+ * Scope case was never normalized, so the same project could accumulate two
+ * disjoint buckets (`project:VU-Server` vs `project:vu-server`) that no query
+ * could union. Canonicalizing the stored scope and the query filter through
+ * this one function keeps exact matching correct, which matters because
+ * buildScopeWhereClause in store.ts mirrors matchesScopeFilter's semantics in
+ * SQL and would otherwise have to diverge.
+ */
+export function canonicalizeScope(value: string | undefined): string | undefined {
+  return normalizeScopeValue(value)?.toLowerCase();
+}
+
 function envScopeCandidate(env: NodeJS.ProcessEnv): { scope?: string; inferredFrom?: string } {
   const explicitEnvKeys = [
     "RECALLNEST_DEFAULT_SCOPE",
@@ -13,7 +27,7 @@ function envScopeCandidate(env: NodeJS.ProcessEnv): { scope?: string; inferredFr
   ] as const;
 
   for (const key of explicitEnvKeys) {
-    const value = normalizeScopeValue(env[key]);
+    const value = canonicalizeScope(env[key]);
     if (value) {
       return {
         scope: value,
@@ -22,7 +36,7 @@ function envScopeCandidate(env: NodeJS.ProcessEnv): { scope?: string; inferredFr
     }
   }
 
-  const sessionId = normalizeScopeValue(env.RECALLNEST_SESSION_ID);
+  const sessionId = canonicalizeScope(env.RECALLNEST_SESSION_ID);
   if (sessionId) {
     return {
       scope: `session:${sessionId}`,
@@ -34,19 +48,23 @@ function envScopeCandidate(env: NodeJS.ProcessEnv): { scope?: string; inferredFr
 }
 
 export function resolveSessionScope(sessionId?: string): string | undefined {
-  const normalized = normalizeScopeValue(sessionId);
+  const normalized = canonicalizeScope(sessionId);
   return normalized ? `session:${normalized}` : undefined;
 }
 
 export function matchesScopeFilter(rowScope: string, scopeFilter?: string[]): boolean {
   if (!scopeFilter || scopeFilter.length === 0) return true;
+  // Compare in canonical form so rows written before scope canonicalization
+  // (and callers still typing the old capitalized form) still match.
+  const row = canonicalizeScope(rowScope) ?? "";
   // Bare scopes match themselves or ":"-separated children only, so a filter
   // like "cc" never bleeds into sibling families such as "ccx:session1".
-  return scopeFilter.some((scope) =>
-    scope.includes(":")
-      ? rowScope === scope
-      : rowScope === scope || rowScope.startsWith(scope + ":"),
-  );
+  return scopeFilter.some((rawScope) => {
+    const scope = canonicalizeScope(rawScope) ?? "";
+    return scope.includes(":")
+      ? row === scope
+      : row === scope || row.startsWith(scope + ":");
+  });
 }
 
 export interface ScopeSelectionOptions {
@@ -74,7 +92,7 @@ export function resolveScopeSelection(options: ScopeSelectionOptions): ScopeSele
     };
   }
 
-  const explicitScope = normalizeScopeValue(options.scope);
+  const explicitScope = canonicalizeScope(options.scope);
   if (explicitScope) {
     return {
       allScopes: false,

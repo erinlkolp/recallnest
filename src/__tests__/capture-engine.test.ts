@@ -112,6 +112,21 @@ describe("persistMemory", () => {
     });
   });
 
+  it("canonicalizes a mixed-case scope on write", async () => {
+    // Regression: `project:VU-Server` and `project:vu-server` were two disjoint
+    // buckets for one project, because writes stored the caller's scope verbatim.
+    const { deps, storedEntries } = createDeps();
+    const result = await persistMemory(deps as any, {
+      text: "VU-Server dial backlight crash on empty payload",
+      category: "cases",
+      scope: "project:VU-Server",
+      source: "manual",
+    });
+
+    expect(result.resolvedScope).toBe("project:vu-server");
+    expect(storedEntries[0].scope).toBe("project:vu-server");
+  });
+
   it("rejects durable memory writes without a scope", async () => {
     const { deps } = createDeps();
 

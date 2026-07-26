@@ -1,4 +1,5 @@
 import type { Embedder } from "./embedder.js";
+import { canonicalizeScope } from "./scope-policy.js";
 import { detectLang, tokenizeFts } from "./language-hook.js";
 import { generateAnchor } from "./anchor-generator.js";
 import { incrementWriteCount } from "./activity-counter.js";
@@ -104,7 +105,13 @@ function resolveScope(input: { scope?: string; source: string }): string {
   if (!input.scope) {
     throw new Error("scope is required for durable memory writes");
   }
-  return input.scope;
+  // Canonical (lowercase) form on write, so a caller typing the repo's
+  // capitalized name cannot open a second bucket for the same project.
+  const canonical = canonicalizeScope(input.scope);
+  if (!canonical) {
+    throw new Error("scope is required for durable memory writes");
+  }
+  return canonical;
 }
 
 function normalizeMemoryText(text: string): string {
