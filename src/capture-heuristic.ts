@@ -161,10 +161,17 @@ export function extractHeuristic(text: string): AutoCaptureItem[] {
       if (pattern.re.test(sentence)) {
         // For correction signals, include the next sentence to capture
         // the actual corrected fact (e.g. "Actually, that's wrong. The limit is 200.")
+        // Only absorb a sentence that carries no signal of its own: an
+        // unconditional lookahead swallowed independent instructions,
+        // decisions and preferences, dropping their signal entirely and
+        // filing their text under the correction's category.
         let capturedText = sentence;
         if (pattern.sourceContext === "correction signal" && i + 1 < sentences.length) {
-          capturedText = `${sentence}. ${sentences[i + 1]}`;
-          i++; // skip next sentence since we consumed it
+          const next = sentences[i + 1];
+          if (!SIGNAL_PATTERNS.some((candidate) => candidate.re.test(next))) {
+            capturedText = `${sentence}. ${next}`;
+            i++; // skip next sentence since we consumed it
+          }
         }
 
         items.push({
