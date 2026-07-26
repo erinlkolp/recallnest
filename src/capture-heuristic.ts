@@ -69,10 +69,25 @@ interface SignalPattern {
   replayPriority: number;
 }
 
+/**
+ * Intensifier adverbs that may sit between "I" and a preference verb.
+ * "I always want X" is as much a preference as "I want X", but the original
+ * patterns only anchored on the bare verb, so adverb-qualified statements —
+ * the more emphatic ones — were the ones being dropped.
+ */
+const PREFERENCE_ADVERBS = "always|never|usually|generally|typically|really|only|strongly";
+
 const SIGNAL_PATTERNS: SignalPattern[] = [
   // --- Preference signals (0.8) ---
+  // "use" stays gated behind an adverb: a bare "I use X" is ordinary narration,
+  // not a stated preference.
   {
-    re: /(?:\b(?:i prefer|i like|i don't like|i hate|i love|i want|i need|i always use|i never use)\b|我喜欢|我不喜欢|我偏好|我想要|我习惯|我一般用|我从不用|我讨厌|以后都用|以后不要)/i,
+    re: new RegExp(
+      `(?:\\bi (?:(?:${PREFERENCE_ADVERBS}) )?(?:prefer|don't like|do not like|like|hate|love|want|need)\\b` +
+      `|\\bi (?:${PREFERENCE_ADVERBS}) use\\b` +
+      "|我喜欢|我不喜欢|我偏好|我想要|我习惯|我一般用|我从不用|我讨厌|以后都用|以后不要)",
+      "i",
+    ),
     category: "preferences",
     importance: 0.8,
     sourceContext: "preference signal",
@@ -87,8 +102,11 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
     replayPriority: 0.6,
   },
   // --- Decision signals (0.7) ---
+  // Label forms ("Decision: ...") sit outside the \b(?:...)\b group on purpose:
+  // a trailing \b after ":" can never match, since ":" and the following space
+  // are both non-word characters. Keeping them inside made them dead alternatives.
   {
-    re: /(?:\b(?:i decided|we decided|let's go with|the decision is|we agreed|final call)\b|决定了|我们选择|最终方案|确定用|就这么定了|敲定)/i,
+    re: /(?:\b(?:i decided|we decided|let's go with|the decision is|we agreed|final call)\b|\bdecision:|决定了|我们选择|最终方案|确定用|就这么定了|敲定)/i,
     category: "events",
     importance: 0.7,
     sourceContext: "decision signal",
@@ -96,7 +114,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   // --- Correction signals (0.85 — high value, user explicitly correcting agent) ---
   {
-    re: /(?:\b(?:actually|no,? not|that's wrong|correction:|you're wrong|that's incorrect)\b|更正|其实不是|不对|搞错了|纠正一下|你说错了|应该是)/i,
+    re: /(?:\b(?:actually|no,? not|that's wrong|you're wrong|that's incorrect)\b|\bcorrection:|更正|其实不是|不对|搞错了|纠正一下|你说错了|应该是)/i,
     category: "cases",
     importance: 0.85,
     sourceContext: "correction signal",
@@ -104,7 +122,7 @@ const SIGNAL_PATTERNS: SignalPattern[] = [
   },
   // --- Explicit memory instruction signals (0.85) ---
   {
-    re: /(?:\b(?:remember that|don't forget|keep in mind|note that|important:)\b|记住|别忘了|注意|以后记得|帮我记|你要记住)/i,
+    re: /(?:\b(?:remember that|don't forget|keep in mind|note that)\b|\bimportant:|记住|别忘了|注意|以后记得|帮我记|你要记住)/i,
     category: "events",
     importance: 0.85,
     sourceContext: "explicit memory instruction",

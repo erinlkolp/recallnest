@@ -243,14 +243,29 @@ export async function composeLightResumeContext(
   const resolvedScope = input.scope || latestCheckpoint?.resolvedScope;
 
   // Retrieve top 3 stable memories (profile + preferences + entities combined)
-  const stableResults = await retrieveCandidates(deps.retriever, {
+  const rawStableResults = await retrieveCandidates(deps.retriever, {
     query: input.task || "identity key facts and preferences",
     limit: 3,
     scope: resolvedScope,
   });
 
-  // Pin assets provide high-signal stable context
-  const pinAssets = (deps.listPins || listPinAssets)(3);
+  // Scope isolation: retrieveCandidates deliberately unions a scoped retrieval
+  // with an unscoped one, so the raw list holds rows from unrelated scopes.
+  // Full mode re-filters before rendering; light mode rendered the union
+  // verbatim, which leaked foreign projects into every wake-up.
+  const stableResults = rawStableResults.filter(
+    (r) => !resolvedScope || matchesScopeFilter(r.entry.scope, [resolvedScope]),
+  );
+
+  // Pin assets provide high-signal stable context. A pin carries the scope of
+  // the memory it was cut from, so honour it the same way. Pins with no
+  // recorded scope stay eligible — they cannot be attributed to a foreign
+  // project, so dropping them would only lose context.
+  const pinAssets = (deps.listPins || listPinAssets)(3).filter((pin) => {
+    const pinScope = pin.source?.scope;
+    if (!resolvedScope || !pinScope) return true;
+    return matchesScopeFilter(pinScope, [resolvedScope]);
+  });
 
   const parts: string[] = [];
   let tokensUsed = 0;
