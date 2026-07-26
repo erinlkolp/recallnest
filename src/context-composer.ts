@@ -471,9 +471,15 @@ export async function composeResumeContext(
     : undefined;
 
   // CC-8: Build essential context from pinned memories, top patterns, and open loops.
+  // Both inputs are scope-gated: patterns come from the filtered recalledResults
+  // union above, and pins are matched on their own source scope. Feeding the raw
+  // retrieval union here would surface another project's memories under a
+  // caller-specified scope.
   const essentialContext = buildEssentialContext({
-    pinAssets,
-    patternResults: filteredPatterns,
+    pinAssets: pinAssets.filter(
+      (pin) => !resolvedScope || matchesScopeFilter(pin.source.scope, [resolvedScope]),
+    ),
+    patternResults: recalledResults.filter((result) => result.entry.category === "patterns"),
     latestCheckpoint,
   });
 
