@@ -1,5 +1,10 @@
 import { extractBoundaryMetadata, extractCanonicalKey, shouldUseStableMemoryResult } from "./memory-boundaries.js";
-import { buildProjectScopeCueTerms, normalizeScopedValue } from "./context-composer-scope.js";
+import {
+  buildProjectScopeCueTerms,
+  isDurableStableScope,
+  isScopeAllowedForRecall,
+  normalizeScopedValue,
+} from "./context-composer-scope.js";
 import { bestSummaryText, cleanText, dedupeText, stripConversationMarkers } from "./context-composer-text.js";
 import type { RetrievalResult } from "./retriever.js";
 import { getConfidence } from "./confidence-tracker.js";
@@ -23,10 +28,6 @@ const STABLE_CATEGORY_LABELS: Record<StableCategory, string> = {
   preferences: "Preference",
   entities: "Entity",
 };
-
-function isDurableStableScope(scope: string): boolean {
-  return scope.startsWith("memory:") || scope.startsWith("asset:");
-}
 
 function isStableCandidateUseful(category: StableCategory, result: RetrievalResult): boolean {
   if (!shouldUseStableMemoryResult({
@@ -78,6 +79,18 @@ function countTaskEntityCueMatches(result: RetrievalResult, taskSeed?: string): 
 
   const haystack = normalizeText(stripConversationMarkers(result.entry.text));
   return cueTerms.filter((term) => haystack.includes(term)).length;
+}
+
+/**
+ * Hard scope precondition for every stable category.
+ *
+ * retrieveCandidates merges a scoped retrieval with an unscoped one, so the
+ * list reaching selectStableResults always holds foreign-scope rows. This gate
+ * is what keeps a caller-specified scope honest; the cue-term logic below is a
+ * relevance refinement applied *within* the permitted set, never a way into it.
+ */
+function isScopePermitted(result: RetrievalResult, scope?: string): boolean {
+  return isScopeAllowedForRecall(result.entry.scope, result.entry.metadata, scope);
 }
 
 function isRelevantToScopedStableRecall(
@@ -173,6 +186,7 @@ export function selectStableResults(
 ): string[] {
   const ranked = results
     .filter((result) =>
+      isScopePermitted(result, params.scope) &&
       isStableCandidateUseful(category, result) &&
       (category !== "preferences" || !hasUnsupportedPreferenceSpecificity(result, params.taskSeed, params.styleFocused)) &&
       (category !== "entities" || isRelevantToScopedStableRecall(result, params))

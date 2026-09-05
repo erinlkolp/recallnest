@@ -29,6 +29,7 @@ import { filterByRelevance } from "./post-retrieval-filter.js";
 import { reconstruct as runReconstruction } from "./context-reconstructor.js";
 import { parseNarrative, isNarrativeModeEnabled } from "./narrative-schema.js";
 import { matchesScopeFilter } from "./scope-policy.js";
+import { isScopeAllowedForRecall } from "./context-composer-scope.js";
 type ResumeCategory = "profile" | "preferences" | "entities" | "patterns" | "cases";
 
 interface ResumeRetriever {
@@ -254,7 +255,7 @@ export async function composeLightResumeContext(
   // Full mode re-filters before rendering; light mode rendered the union
   // verbatim, which leaked foreign projects into every wake-up.
   const stableResults = rawStableResults.filter(
-    (r) => !resolvedScope || matchesScopeFilter(r.entry.scope, [resolvedScope]),
+    (r) => isScopeAllowedForRecall(r.entry.scope, r.entry.metadata, resolvedScope),
   );
 
   // Pin assets provide high-signal stable context. A pin carries the scope of
@@ -442,7 +443,7 @@ export async function composeResumeContext(
     ...entityResults,
     ...filteredPatterns,
     ...filteredCases,
-  ].filter((r) => !resolvedScope || matchesScopeFilter(r.entry.scope, [resolvedScope]));
+  ].filter((r) => isScopeAllowedForRecall(r.entry.scope, r.entry.metadata, resolvedScope));
 
   // HP-narrative: Group recalled items by life period for narrative context
   let narrativeGroups: Array<{ period: string; items: string[] }> | undefined;
