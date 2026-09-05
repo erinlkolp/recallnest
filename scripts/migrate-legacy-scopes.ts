@@ -23,6 +23,7 @@ const RULES: ReadonlyArray<{ from: string; to: string }> = [
   { from: "recallnest", to: "project:recallnest" },
   { from: "memory", to: "project:discord-mcp" },
   { from: "openpets", to: "project:openpets" },
+  { from: "glasssky", to: "project:glasssky" },
 ];
 
 interface MemoryRow {
