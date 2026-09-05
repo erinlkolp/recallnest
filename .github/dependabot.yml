@@ -1,34 +1,10 @@
 version: 2
 updates:
+  # Node/Bun dependencies (package.json + bun.lock).
+  # Must stay on the "bun" ecosystem: the "npm" ecosystem cannot update
+  # bun.lock, so its PRs bump package.json alone and CI's
+  # `bun install --frozen-lockfile` fails. Do not re-add an "npm" entry for "/".
   - package-ecosystem: "bun"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    groups:
-      npm-minor-patch:
-        update-types: ["minor", "patch"]
-        
-  # GitHub Actions used by the workflows in .github/workflows/
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/New_York"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "ci"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-
-  # Node/Bun dependencies (package.json + bun.lock)
-  - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -47,3 +23,22 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # GitHub Actions used by the workflows in .github/workflows/
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
