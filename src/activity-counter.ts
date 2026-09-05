@@ -10,7 +10,9 @@ import {
   writeFileSync,
   mkdirSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
+
+import { dataPath } from "./data-dir.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -28,10 +30,11 @@ export interface ActivityCounterConfig {
 }
 
 export const DEFAULT_ACTIVITY_CONFIG: ActivityCounterConfig = {
-  statsPath: join(
-    process.env.RECALLNEST_DATA_DIR || "data",
-    "activity-stats.json",
-  ),
+  // Getter, not a value: resolveConfig() spreads this object, so the path is
+  // resolved per call rather than frozen at module-import time.
+  get statsPath(): string {
+    return dataPath("activity-stats.json");
+  },
   lightThreshold: 15,
   standardThreshold: 50,
   deepThreshold: 200,

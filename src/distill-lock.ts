@@ -18,7 +18,9 @@ import {
   utimesSync,
   existsSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
+
+import { dataPath } from "./data-dir.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -34,7 +36,10 @@ export interface DistillLockConfig {
 }
 
 export const DEFAULT_DISTILL_LOCK_CONFIG: DistillLockConfig = {
-  lockPath: join(process.env.RECALLNEST_DATA_DIR || "data", "distill.lock"),
+  // Getter: see activity-counter.ts — resolveConfig() spreads this object.
+  get lockPath(): string {
+    return dataPath("distill.lock");
+  },
   expireMs: 3_600_000,
   minCheckpoints: 3,
 };
