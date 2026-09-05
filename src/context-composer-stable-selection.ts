@@ -1,5 +1,7 @@
 import { extractBoundaryMetadata, extractCanonicalKey, shouldUseStableMemoryResult } from "./memory-boundaries.js";
 import { buildProjectScopeCueTerms, normalizeScopedValue } from "./context-composer-scope.js";
+import { matchesScopeFilter } from "./scope-policy.js";
+import { parsePrivacyTier } from "./memory-schema.js";
 import { bestSummaryText, cleanText, dedupeText, stripConversationMarkers } from "./context-composer-text.js";
 import type { RetrievalResult } from "./retriever.js";
 import { getConfidence } from "./confidence-tracker.js";
@@ -78,6 +80,24 @@ function countTaskEntityCueMatches(result: RetrievalResult, taskSeed?: string): 
 
   const haystack = normalizeText(stripConversationMarkers(result.entry.text));
   return cueTerms.filter((term) => haystack.includes(term)).length;
+}
+
+/**
+ * Hard scope precondition for every stable category.
+ *
+ * retrieveCandidates merges a scoped retrieval with an unscoped one, so the
+ * list reaching selectStableResults always holds foreign-scope rows. This gate
+ * is what keeps a caller-specified scope honest; the cue-term logic below is a
+ * relevance refinement applied *within* the permitted set, never a way into it.
+ */
+function isScopePermitted(result: RetrievalResult, scope?: string): boolean {
+  if (!scope) return true;
+  // Pins and briefs carry the scope of the asset they were cut from and cannot
+  // be attributed to a foreign project, so they stay eligible.
+  if (isDurableStableScope(result.entry.scope)) return true;
+  // privacyTier "shared" is the supported cross-scope escape hatch.
+  if (parsePrivacyTier(result.entry.metadata) === "shared") return true;
+  return matchesScopeFilter(result.entry.scope, [scope]);
 }
 
 function isRelevantToScopedStableRecall(
@@ -173,6 +193,7 @@ export function selectStableResults(
 ): string[] {
   const ranked = results
     .filter((result) =>
+      isScopePermitted(result, params.scope) &&
       isStableCandidateUseful(category, result) &&
       (category !== "preferences" || !hasUnsupportedPreferenceSpecificity(result, params.taskSeed, params.styleFocused)) &&
       (category !== "entities" || isRelevantToScopedStableRecall(result, params))
