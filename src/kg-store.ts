@@ -105,7 +105,7 @@ export class KGStore {
 
       try {
         table = await db.createTable(KG_TABLE_NAME, [schemaEntry] as unknown as Record<string, unknown>[]);
-        await table.delete('id = "__schema__"');
+        await table.delete("id = '__schema__'");
       } catch (createErr) {
         if (String(createErr).includes("already exists")) {
           table = await db.openTable(KG_TABLE_NAME);

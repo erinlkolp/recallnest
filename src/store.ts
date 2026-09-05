@@ -319,7 +319,7 @@ export class MemoryStore {
 
       try {
         table = await db.createTable(TABLE_NAME, [schemaEntry] as unknown as Record<string, unknown>[]);
-        await table.delete('id = "__schema__"');
+        await table.delete("id = '__schema__'");
       } catch (createErr) {
         // Race: another caller (or eventual consistency) created the table
         // between our failed openTable and this createTable — just open it.
