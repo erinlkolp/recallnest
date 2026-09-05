@@ -11,7 +11,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { dataPath } from "./data-dir.js";
 import { resolveQueryEntities } from "./entity-resolver.js";
 
 interface SynonymEntry {
@@ -91,7 +91,7 @@ export function resetAliasMapCache(): void {
 
 function loadAliasMap(): AliasEntry[] {
   if (aliasMapCache !== null) return aliasMapCache;
-  const filePath = aliasMapPath ?? join(process.cwd(), "data", "alias-map.json");
+  const filePath = aliasMapPath ?? dataPath("alias-map.json");
   try {
     if (existsSync(filePath)) {
       const raw = JSON.parse(readFileSync(filePath, "utf-8"));

@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { dataPath } from "./data-dir.js";
+
 export interface RetentionPolicy {
   /** Auto-archive memories older than this many days (0 = disabled) */
   autoArchiveAfterDays: number;
@@ -28,10 +30,7 @@ function scopeHash(scope: string): string {
 }
 
 function retentionDir(configDir?: string): string {
-  return join(
-    configDir ?? (process.env.RECALLNEST_DATA_DIR || "data"),
-    "retention",
-  );
+  return configDir ? join(configDir, "retention") : dataPath("retention");
 }
 
 /** Load policy for a scope. Falls back to default if not configured. */
