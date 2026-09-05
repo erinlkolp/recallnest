@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { resolveDataDir, dataPath } from "../data-dir.js";
 import { DEFAULT_ACTIVITY_CONFIG } from "../activity-counter.js";
 import { DEFAULT_DISTILL_LOCK_CONFIG } from "../distill-lock.js";
+import { DEFAULT_FREQUENCY_CONFIG } from "../frequency-tracker.js";
 
 const INSTALL_DATA_DIR = resolve(import.meta.dir, "../..", "data");
 
@@ -84,6 +85,9 @@ describe("data-dir: late env binding (regression)", () => {
     expect(DEFAULT_DISTILL_LOCK_CONFIG.lockPath).toBe(
       "/var/tmp/late-bound/distill.lock",
     );
+    expect(DEFAULT_FREQUENCY_CONFIG.filePath).toBe(
+      "/var/tmp/late-bound/frequency-stats.json",
+    );
   });
 
   it("survives object spread, which is how resolveConfig consumes the defaults", () => {
@@ -95,6 +99,9 @@ describe("data-dir: late env binding (regression)", () => {
     expect({ ...DEFAULT_DISTILL_LOCK_CONFIG }.lockPath).toBe(
       "/var/tmp/spread-bound/distill.lock",
     );
+    expect({ ...DEFAULT_FREQUENCY_CONFIG }.filePath).toBe(
+      "/var/tmp/spread-bound/frequency-stats.json",
+    );
   });
 
   it("never defaults to a cwd-relative path", () => {
@@ -102,5 +109,34 @@ describe("data-dir: late env binding (regression)", () => {
 
     expect(isAbsolute(DEFAULT_ACTIVITY_CONFIG.statsPath)).toBe(true);
     expect(isAbsolute(DEFAULT_DISTILL_LOCK_CONFIG.lockPath)).toBe(true);
+    expect(isAbsolute(DEFAULT_FREQUENCY_CONFIG.filePath)).toBe(true);
+  });
+});
+
+describe("data-dir: no module resolves storage against the cwd", () => {
+  // Guard for the whole bug class. The original fix missed frequency-tracker
+  // and query-expander because the search was for RECALLNEST_DATA_DIR rather
+  // than process.cwd(); this fails if a new one is introduced.
+  const SRC = resolve(import.meta.dir, "..");
+  const ALLOWED = new Set([
+    // Resolves dbPath relative to the config file's location, falling back to
+    // cwd only for an explicitly-passed config path. Not storage-on-disk.
+    "doctor.ts",
+    // Documents the bug in a comment.
+    "data-dir.ts",
+  ]);
+
+  it("has no cwd-relative storage paths left in src/", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const offenders: string[] = [];
+
+    for (const entry of readdirSync(SRC, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+      if (ALLOWED.has(entry.name)) continue;
+      const body = readFileSync(join(SRC, entry.name), "utf-8");
+      if (body.includes("process.cwd()")) offenders.push(entry.name);
+    }
+
+    expect(offenders).toEqual([]);
   });
 });

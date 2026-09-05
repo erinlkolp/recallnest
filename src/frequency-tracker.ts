@@ -12,7 +12,9 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
+import { dirname } from "path";
+
+import { dataPath } from "./data-dir.js";
 import { logWarn } from "./stderr-log.js";
 
 // ============================================================================
@@ -56,7 +58,11 @@ export interface FrequencyTrackerConfig {
 export const MAX_FREQUENCY_BOOST = 0.15;
 
 export const DEFAULT_FREQUENCY_CONFIG: FrequencyTrackerConfig = {
-  filePath: join(process.cwd(), "data", "frequency-stats.json"),
+  // Getter, not a value: the constructor spreads this object, so the path is
+  // resolved per instantiation and never bound to the process cwd.
+  get filePath(): string {
+    return dataPath("frequency-stats.json");
+  },
   boostFactor: 0.03,
   decayHalfLifeDays: 30,
   minHitsForBoost: 2,
