@@ -5,13 +5,31 @@
  *
  * Note: Some providers (e.g. Jina) support extra parameters like `task` and
  * `normalized` on the embeddings endpoint. The OpenAI SDK types do not include
- * these fields, so we pass them via a narrow `any` cast.
+ * these fields, so `EmbeddingPayload` widens the SDK's params type to carry them.
  */
 
 import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
 import { logInfo, logWarn } from "./stderr-log.js";
+
+/**
+ * Request body for `client.embeddings.create`.
+ *
+ * `encoding_format` is pinned to the literal `"float"` rather than widened to
+ * the SDK's union: openai >= 7.5.0 overloads `create` on
+ * `encoding_format: "base64"`, and that overload resolves to a response whose
+ * `embedding` is a base64 `string` instead of `number[]`. Keeping the literal
+ * here selects the float overload, so callers get `number[]` without casting.
+ *
+ * `task` and `normalized` are Jina extensions the OpenAI SDK does not model;
+ * they are forwarded verbatim to OpenAI-compatible providers that accept them.
+ */
+type EmbeddingPayload = Omit<OpenAI.EmbeddingCreateParams, "encoding_format"> & {
+  encoding_format: "float";
+  task?: string;
+  normalized?: boolean;
+};
 
 const EMBEDDING_RETRY_DELAYS_MS = [200, 500];
 const EMBEDDING_MAX_CONCURRENCY = 4;
@@ -290,8 +308,8 @@ export class Embedder {
     }
   }
 
-  private buildPayload(input: string | string[], task?: string): any {
-    const payload: any = {
+  private buildPayload(input: string | string[], task?: string): EmbeddingPayload {
+    const payload: EmbeddingPayload = {
       model: this.model,
       input,
       // Force float output to avoid SDK default base64 decoding path.
@@ -334,7 +352,7 @@ export class Embedder {
     while (true) {
       try {
         return await this.withEmbeddingSlot(() =>
-          this.client.embeddings.create(this.buildPayload(input, task) as any)
+          this.client.embeddings.create(this.buildPayload(input, task))
         );
       } catch (error) {
         if (!isTransientEmbeddingError(error) || attempt >= EMBEDDING_RETRY_DELAYS_MS.length) {
@@ -361,7 +379,7 @@ export class Embedder {
 
     try {
       const response = await this.createEmbedding(text, task);
-      const embedding = response.data[0]?.embedding as number[] | undefined;
+      const embedding = response.data[0]?.embedding;
       if (!embedding) {
         throw new Error("No embedding returned from provider");
       }
@@ -479,7 +497,7 @@ export class Embedder {
             `Embedding response index out of range: provider returned index ${responseIdx} for ${validTexts.length} inputs`,
           );
         }
-        const embedding = item.embedding as number[];
+        const embedding = item.embedding;
 
         this.validateEmbedding(embedding);
         results[originalIndex] = embedding;

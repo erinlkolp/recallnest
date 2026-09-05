@@ -203,3 +203,37 @@ describe("Embedder batch response integrity", () => {
     ]);
   });
 });
+
+describe("Embedder request payload", () => {
+  it("pins encoding_format to float so the provider returns number[] embeddings", async () => {
+    const embedder = new Embedder({
+      provider: "openai-compatible",
+      apiKey: "test-key",
+      model: "text-embedding-3-small",
+      dimensions: 3,
+    });
+
+    const payloads: any[] = [];
+    (embedder as any).client = {
+      embeddings: {
+        create: async (body: any) => {
+          payloads.push(body);
+          const inputs = Array.isArray(body.input) ? body.input : [body.input];
+          return {
+            data: inputs.map((_: string, index: number) => ({ index, embedding: [1, 2, 3] })),
+          };
+        },
+      },
+    };
+
+    await embedder.embedPassage("hello");
+    await embedder.embedBatchPassage(["aaa", "bbb"]);
+
+    expect(payloads.length).toBe(2);
+    // Base64 would make `embedding` a string at runtime, and (on openai >= 7.5.0)
+    // select the SDK overload whose response type is a base64 string.
+    for (const payload of payloads) {
+      expect(payload.encoding_format).toBe("float");
+    }
+  });
+});
