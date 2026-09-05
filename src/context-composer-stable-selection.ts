@@ -1,7 +1,10 @@
 import { extractBoundaryMetadata, extractCanonicalKey, shouldUseStableMemoryResult } from "./memory-boundaries.js";
-import { buildProjectScopeCueTerms, normalizeScopedValue } from "./context-composer-scope.js";
-import { matchesScopeFilter } from "./scope-policy.js";
-import { parsePrivacyTier } from "./memory-schema.js";
+import {
+  buildProjectScopeCueTerms,
+  isDurableStableScope,
+  isScopeAllowedForRecall,
+  normalizeScopedValue,
+} from "./context-composer-scope.js";
 import { bestSummaryText, cleanText, dedupeText, stripConversationMarkers } from "./context-composer-text.js";
 import type { RetrievalResult } from "./retriever.js";
 import { getConfidence } from "./confidence-tracker.js";
@@ -25,10 +28,6 @@ const STABLE_CATEGORY_LABELS: Record<StableCategory, string> = {
   preferences: "Preference",
   entities: "Entity",
 };
-
-function isDurableStableScope(scope: string): boolean {
-  return scope.startsWith("memory:") || scope.startsWith("asset:");
-}
 
 function isStableCandidateUseful(category: StableCategory, result: RetrievalResult): boolean {
   if (!shouldUseStableMemoryResult({
@@ -91,13 +90,7 @@ function countTaskEntityCueMatches(result: RetrievalResult, taskSeed?: string): 
  * relevance refinement applied *within* the permitted set, never a way into it.
  */
 function isScopePermitted(result: RetrievalResult, scope?: string): boolean {
-  if (!scope) return true;
-  // Pins and briefs carry the scope of the asset they were cut from and cannot
-  // be attributed to a foreign project, so they stay eligible.
-  if (isDurableStableScope(result.entry.scope)) return true;
-  // privacyTier "shared" is the supported cross-scope escape hatch.
-  if (parsePrivacyTier(result.entry.metadata) === "shared") return true;
-  return matchesScopeFilter(result.entry.scope, [scope]);
+  return isScopeAllowedForRecall(result.entry.scope, result.entry.metadata, scope);
 }
 
 function isRelevantToScopedStableRecall(

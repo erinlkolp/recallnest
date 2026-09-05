@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
+import { composeResumeContext } from "../context-composer.js";
 import { selectStableResults } from "../context-composer-stable-selection.js";
 import type { RetrievalResult } from "../retriever.js";
 
@@ -179,5 +180,64 @@ describe("selectStableResults scope isolation", () => {
     );
 
     expect(renderedText(lines)).toContain("VU-Server");
+  });
+});
+
+/**
+ * privacyTier "shared" must mean the same thing everywhere in one response.
+ *
+ * selectStableResults honours it, but composeResumeContext filtered the
+ * collapsed view, the recalled union and the pin list with a bare
+ * matchesScopeFilter — so a shared memory reached "Stable context" and was
+ * then dropped from "Collapsed context" and "Essential context" in the very
+ * same payload.
+ */
+describe("privacyTier shared is honoured consistently across sections", () => {
+  const SHARED_TEXT = "Erin's attribution rule applies to anything posted publicly under their name.";
+  const FOREIGN_TEXT = "claude-memory-pro is the maintenance target for a different repository.";
+
+  function buildRetriever() {
+    return {
+      async retrieve(context: { category?: string; scopeFilter?: string[] }) {
+        if (context.category !== "entities") return [];
+        const shared = buildResult(
+          "entity-shared",
+          "entities",
+          SHARED_TEXT,
+          "project:vu-server",
+          JSON.stringify({ privacyTier: "shared" }),
+        );
+        const foreign = buildResult("entity-foreign", "entities", FOREIGN_TEXT, "project:other");
+        // A scoped retrieval returns only in-scope rows; the unscoped one returns
+        // everything. composeResumeContext merges both, then re-filters.
+        if (context.scopeFilter?.includes("project:recallnest")) return [];
+        return [shared, foreign];
+      },
+    };
+  }
+
+  async function compose() {
+    return composeResumeContext({
+      retriever: buildRetriever(),
+      checkpointStore: { async getLatest() { return null; } },
+      listPins: () => [],
+    } as never, {
+      task: "attribution and publishing rules",
+      scope: "project:recallnest",
+      includeLatestCheckpoint: false,
+      limitPerSection: 3,
+    });
+  }
+
+  it("keeps a shared memory in the collapsed view", async () => {
+    const response = await compose();
+    const ids = (response.collapsedItems ?? []).map((item) => item.entryId);
+    expect(ids).toContain("entity-shared");
+  });
+
+  it("still keeps a non-shared foreign memory out of the collapsed view", async () => {
+    const response = await compose();
+    const collapsed = (response.collapsedItems ?? []).map((item) => item.text).join(" ");
+    expect(collapsed).not.toContain("claude-memory-pro");
   });
 });

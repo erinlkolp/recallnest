@@ -1,4 +1,6 @@
 import { dedupeText } from "./context-composer-text.js";
+import { matchesScopeFilter } from "./scope-policy.js";
+import { parsePrivacyTier } from "./memory-schema.js";
 import {
   GENERIC_SCOPE_TERMS,
   buildTaskHintTerms,
@@ -11,6 +13,32 @@ export function normalizeScopedValue(scope: string): string {
   if (normalized.startsWith("memory:")) return normalized.slice("memory:".length);
   if (normalized.startsWith("asset:")) return normalized.slice("asset:".length);
   return normalized;
+}
+
+/**
+ * A pin or brief carries the scope of the asset it was cut from and so cannot
+ * be attributed to a foreign project.
+ */
+export function isDurableStableScope(scope: string): boolean {
+  return scope.startsWith("memory:") || scope.startsWith("asset:");
+}
+
+/**
+ * Single source of truth for "may this row appear under the requested scope?".
+ *
+ * Every section of a resume_context response must answer this the same way,
+ * otherwise a memory renders in one block and vanishes from the next.
+ */
+export function isScopeAllowedForRecall(
+  entryScope: string,
+  metadata: string | undefined,
+  requestScope?: string,
+): boolean {
+  if (!requestScope) return true;
+  if (isDurableStableScope(entryScope)) return true;
+  // privacyTier "shared" is the supported cross-scope escape hatch.
+  if (parsePrivacyTier(metadata) === "shared") return true;
+  return matchesScopeFilter(entryScope, [requestScope]);
 }
 
 function buildScopeIdentityTerms(scope?: string): string[] {
